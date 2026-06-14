@@ -1,0 +1,21 @@
+#ifndef NURL_NET_H
+#define NURL_NET_H
+
+/**
+ * Resolves the given hostname and connects to it over TCP on the specified port.
+ * Returns the socket file descriptor on success, or -1 on error.
+ */
+int nurl_net_connect(const char *hostname, int port);
+
+/**
+ * Sets send and receive timeouts on the socket descriptor.
+ * Returns 0 on success, or -1 on failure.
+ */
+int nurl_net_set_timeout(int socket_fd, unsigned long seconds);
+
+/**
+ * Closes the given socket file descriptor.
+ */
+void nurl_net_close(int socket_fd);
+
+#endif /* NURL_NET_H */
