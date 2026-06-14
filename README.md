@@ -11,8 +11,15 @@ Unlike traditional HTTP clients that clutter your screen with verbose layouts an
 ### Requirements
 Ensure you have the Rust toolchain installed. If not, get it from [rustup.rs](https://rustup.rs/).
 
+### Installation from Crates.io
+You can install `nurl` directly via Cargo:
+
+```bash
+cargo install networkurl
+```
+
 ### Installing from Source
-Clone the repository and compile the binary to your path:
+Clone the repository and compile the binary:
 
 ```bash
 git clone https://github.com/sapirrior/nurl.git
