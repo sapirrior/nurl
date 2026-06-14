@@ -2,6 +2,10 @@
 name = "networkurl"
 version = "0.1.0"
 edition = "2021"
+description = "NetworkURL (nurl) — A clean, fast, and structured HTTP client CLI"
+license = "MIT"
+repository = "https://github.com/sapirrior/nurl"
+readme = "README.md"
 
 [[bin]]
 name = "nurl"
