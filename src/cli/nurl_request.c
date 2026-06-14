@@ -210,21 +210,21 @@ int nurl_request_generic(const char *method, const char *url, const CommonArgs *
         int port = 0;
 
         if (nurl_utils_parse_url(current_url, &scheme, &host, &port, &path) != 0) {
-            fprintf(stderr, "Error: Invalid URL format: %s\n", current_url);
+            fprintf(stderr, "nurl: (4) Malformed URL: %s\n", current_url);
             free(current_url);
             return NURL_ERR_INVALID_URL;
         }
 
         bool use_tls = (strcmp(scheme, "https") == 0);
         if (!use_tls) {
-            fprintf(stderr, "Error: nurl currently only supports HTTPS (TLS) requests.\n");
+            fprintf(stderr, "nurl: (5) nurl currently only supports HTTPS (TLS) requests.\n");
             free(scheme); free(host); free(path); free(current_url);
             return NURL_ERR_TLS;
         }
 
         int sock_fd = nurl_net_connect(host, port);
         if (sock_fd < 0) {
-            fprintf(stderr, "Error: Could not connect to host %s:%d\n", host, port);
+            fprintf(stderr, "nurl: (2) Could not connect to host %s:%d\n", host, port);
             free(scheme); free(host); free(path); free(current_url);
             return NURL_ERR_NETWORK;
         }
@@ -235,14 +235,14 @@ int nurl_request_generic(const char *method, const char *url, const CommonArgs *
 
         nurl_tls_t *tls = nurl_tls_create(!common->no_verify, common->cacert);
         if (!tls) {
-            fprintf(stderr, "Error: Failed to initialize TLS context.\n");
+            fprintf(stderr, "nurl: (5) Failed to initialize TLS context.\n");
             nurl_net_close(sock_fd);
             free(scheme); free(host); free(path); free(current_url);
             return NURL_ERR_TLS;
         }
 
         if (nurl_tls_handshake(tls, sock_fd, host) != 0) {
-            fprintf(stderr, "Error: TLS verification failed.\n");
+            fprintf(stderr, "nurl: (5) TLS verification failed.\n");
             nurl_tls_free(tls);
             nurl_net_close(sock_fd);
             free(scheme); free(host); free(path); free(current_url);
@@ -379,7 +379,7 @@ int nurl_request_generic(const char *method, const char *url, const CommonArgs *
         }
 
         if (oom) {
-            fprintf(stderr, "Error: Out of memory preparing headers.\n");
+            fprintf(stderr, "nurl: (1) Out of memory preparing headers.\n");
             free(extra_hdr);
             nurl_tls_free(tls);
             nurl_net_close(sock_fd);
@@ -389,7 +389,7 @@ int nurl_request_generic(const char *method, const char *url, const CommonArgs *
 
         if (common->verbose && !common->silent) {
             fprintf(stderr, "* Connected to %s port %d\n", host, port);
-            fprintf(stderr, "* TLS handshake complete\n\n");
+            fprintf(stderr, "* TLS handshake complete\n*\n");
             fprintf(stderr, "> %s %s HTTP/1.1\n", method, path);
             fprintf(stderr, "> Host: %s\n", host);
             fprintf(stderr, "> User-Agent: nurl/0.1.1\n");
@@ -410,7 +410,7 @@ int nurl_request_generic(const char *method, const char *url, const CommonArgs *
                 line = strtok(NULL, "\r\n");
             }
             free(hdr_copy);
-            fprintf(stderr, "\n");
+            fprintf(stderr, "> \n");
         }
 
         const unsigned char *body_data = (const unsigned char *)common->data;
@@ -420,7 +420,7 @@ int nurl_request_generic(const char *method, const char *url, const CommonArgs *
         free(extra_hdr);
 
         if (!res) {
-            fprintf(stderr, "Error: HTTP request failed or timed out.\n");
+            fprintf(stderr, "nurl: (2) HTTP request failed or timed out.\n");
             nurl_tls_free(tls);
             nurl_net_close(sock_fd);
             free(scheme); free(host); free(path); free(current_url);
@@ -521,7 +521,7 @@ int nurl_request_generic(const char *method, const char *url, const CommonArgs *
             for (size_t i = 0; i < res->header_count; i++) {
                 fprintf(stderr, "< %s\n", res->headers[i]);
             }
-            fprintf(stderr, "\n");
+            fprintf(stderr, "< \n");
         }
 
         if (common->location && res->status_code >= 300 && res->status_code < 400) {
@@ -574,7 +574,7 @@ int nurl_request_generic(const char *method, const char *url, const CommonArgs *
         if (common->output) {
             FILE *f = fopen(common->output, "wb");
             if (!f) {
-                fprintf(stderr, "Error: Could not open file for writing: %s\n", common->output);
+                fprintf(stderr, "nurl: (6) Could not open file for writing: %s\n", common->output);
                 nurl_http_response_free(res);
                 return NURL_ERR_WRITE;
             }
@@ -582,9 +582,6 @@ int nurl_request_generic(const char *method, const char *url, const CommonArgs *
                 fwrite(res->body, 1, res->body_len, f);
             }
             fclose(f);
-            if (!common->silent) {
-                fprintf(stderr, "+ Saved response to %s (%zu bytes)\n", common->output, res->body_len);
-            }
         } else {
             if (res->body_len > 0) {
                 printf("%s\n", res->body);

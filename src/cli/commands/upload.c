@@ -36,13 +36,13 @@ static bool has_header(char **headers, size_t count, const char *key) {
 
 int nurl_cmd_upload(const char *url, const CommonArgs *common) {
     if (!common->upload_file) {
-        fprintf(stderr, "Error: No upload file specified.\n");
+        fprintf(stderr, "nurl: (1) No upload file specified.\n");
         return NURL_ERR_GENERIC;
     }
 
     FILE *f = fopen(common->upload_file, "rb");
     if (!f) {
-        fprintf(stderr, "Error: Could not read upload file '%s'\n", common->upload_file);
+        fprintf(stderr, "nurl: (6) Could not read upload file '%s'\n", common->upload_file);
         return NURL_ERR_WRITE;
     }
 
@@ -59,7 +59,7 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
     if (fsize > 0) {
         size_t read_bytes = fread(file_bytes, 1, fsize, f);
         if (read_bytes != (size_t)fsize) {
-            fprintf(stderr, "Error: Failed to read file bytes.\n");
+            fprintf(stderr, "nurl: (6) Failed to read file bytes.\n");
             free(file_bytes);
             fclose(f);
             return NURL_ERR_WRITE;
@@ -200,7 +200,7 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
     }
 
     if (oom) {
-        fprintf(stderr, "Error: Out of memory preparing headers.\n");
+        fprintf(stderr, "nurl: (1) Out of memory preparing headers.\n");
         free(body);
         free(extra_hdr);
         return NURL_ERR_GENERIC;
@@ -212,7 +212,7 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
     int port = 0;
 
     if (nurl_utils_parse_url(url, &scheme, &host, &port, &path) != 0) {
-        fprintf(stderr, "Error: Invalid URL format: %s\n", url);
+        fprintf(stderr, "nurl: (4) Malformed URL: %s\n", url);
         free(body);
         free(extra_hdr);
         return NURL_ERR_INVALID_URL;
@@ -220,7 +220,7 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
 
     int sock_fd = nurl_net_connect(host, port);
     if (sock_fd < 0) {
-        fprintf(stderr, "Error: Could not connect to host %s:%d\n", host, port);
+        fprintf(stderr, "nurl: (2) Could not connect to host %s:%d\n", host, port);
         free(body);
         free(extra_hdr);
         free(scheme); free(host); free(path);
@@ -233,7 +233,7 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
 
     nurl_tls_t *tls = nurl_tls_create(!common->no_verify, common->cacert);
     if (!tls) {
-        fprintf(stderr, "Error: Failed to initialize TLS context.\n");
+        fprintf(stderr, "nurl: (5) Failed to initialize TLS context.\n");
         nurl_net_close(sock_fd);
         free(body);
         free(extra_hdr);
@@ -243,7 +243,7 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
 
     if (common->verbose && !common->silent) {
         fprintf(stderr, "* Connected to %s port %d\n", host, port);
-        fprintf(stderr, "* TLS handshake complete\n\n");
+        fprintf(stderr, "* TLS handshake complete\n*\n");
         fprintf(stderr, "> POST %s HTTP/1.1\n", path);
         fprintf(stderr, "> Host: %s\n", host);
         fprintf(stderr, "> User-Agent: nurl/0.1.1\n");
@@ -264,11 +264,11 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
             line = strtok(NULL, "\r\n");
         }
         free(hdr_copy);
-        fprintf(stderr, "\n");
+        fprintf(stderr, "> \n");
     }
 
     if (nurl_tls_handshake(tls, sock_fd, host) != 0) {
-        fprintf(stderr, "Error: TLS verification failed.\n");
+        fprintf(stderr, "nurl: (5) TLS verification failed.\n");
         nurl_tls_free(tls);
         nurl_net_close(sock_fd);
         free(body);
@@ -283,7 +283,7 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
     free(extra_hdr);
 
     if (!res) {
-        fprintf(stderr, "Error: HTTP request failed or timed out.\n");
+        fprintf(stderr, "nurl: (2) HTTP request failed or timed out.\n");
         nurl_tls_free(tls);
         nurl_net_close(sock_fd);
         free(scheme); free(host); free(path);
@@ -295,7 +295,7 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
         for (size_t i = 0; i < res->header_count; i++) {
             fprintf(stderr, "< %s\n", res->headers[i]);
         }
-        fprintf(stderr, "\n");
+        fprintf(stderr, "< \n");
     }
 
     nurl_tls_free(tls);
@@ -314,7 +314,7 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
         if (common->output) {
             FILE *out_f = fopen(common->output, "wb");
             if (!out_f) {
-                fprintf(stderr, "Error: Could not open file for writing: %s\n", common->output);
+                fprintf(stderr, "nurl: (6) Could not open file for writing: %s\n", common->output);
                 nurl_http_response_free(res);
                 return NURL_ERR_WRITE;
             }

@@ -63,7 +63,7 @@ int nurl_cmd_ping(const char *url, const CommonArgs *common) {
     int port = 0;
 
     if (nurl_utils_parse_url(url, &scheme, &host, &port, &path) != 0) {
-        fprintf(stderr, "Error: Invalid URL format: %s\n", url);
+        fprintf(stderr, "nurl: (4) Malformed URL: %s\n", url);
         return NURL_ERR_INVALID_URL;
     }
 
@@ -100,7 +100,7 @@ int nurl_cmd_ping(const char *url, const CommonArgs *common) {
             }
             free(status_text);
         } else {
-            fprintf(stderr, "Error: Ping failed for %s\n", host);
+            fprintf(stderr, "nurl: (2) Ping failed for %s\n", host);
             free(scheme); free(host); free(path);
             free(latencies);
             return NURL_ERR_NETWORK;

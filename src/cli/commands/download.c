@@ -43,7 +43,7 @@ int nurl_cmd_download(const char *url, const CommonArgs *common) {
     int port = 0;
 
     if (nurl_utils_parse_url(url, &scheme, &host, &port, &path) != 0) {
-        fprintf(stderr, "Error: Invalid URL format: %s\n", url);
+        fprintf(stderr, "nurl: (4) Malformed URL: %s\n", url);
         return NURL_ERR_INVALID_URL;
     }
 
@@ -83,7 +83,7 @@ int nurl_cmd_download(const char *url, const CommonArgs *common) {
     // Connect and start TLS
     int sock_fd = nurl_net_connect(host, port);
     if (sock_fd < 0) {
-        fprintf(stderr, "Error: Could not connect to host %s:%d\n", host, port);
+        fprintf(stderr, "nurl: (2) Could not connect to host %s:%d\n", host, port);
         free(filename); free(scheme); free(host); free(path);
         return NURL_ERR_NETWORK;
     }
@@ -94,14 +94,14 @@ int nurl_cmd_download(const char *url, const CommonArgs *common) {
 
     nurl_tls_t *tls = nurl_tls_create(!common->no_verify, common->cacert);
     if (!tls) {
-        fprintf(stderr, "Error: Failed to initialize TLS context.\n");
+        fprintf(stderr, "nurl: (5) Failed to initialize TLS context.\n");
         nurl_net_close(sock_fd);
         free(filename); free(scheme); free(host); free(path);
         return NURL_ERR_TLS;
     }
 
     if (nurl_tls_handshake(tls, sock_fd, host) != 0) {
-        fprintf(stderr, "Error: TLS verification failed.\n");
+        fprintf(stderr, "nurl: (5) TLS verification failed.\n");
         nurl_tls_free(tls);
         nurl_net_close(sock_fd);
         free(filename); free(scheme); free(host); free(path);
@@ -162,7 +162,7 @@ int nurl_cmd_download(const char *url, const CommonArgs *common) {
     }
 
     if (oom) {
-        fprintf(stderr, "Error: Out of memory.\n");
+        fprintf(stderr, "nurl: (1) Out of memory.\n");
         free(extra_hdr);
         nurl_tls_free(tls);
         nurl_net_close(sock_fd);
@@ -225,7 +225,7 @@ int nurl_cmd_download(const char *url, const CommonArgs *common) {
     }
 
     if (!boundary) {
-        fprintf(stderr, "Error: Malformed HTTP response headers.\n");
+        fprintf(stderr, "nurl: (2) Malformed HTTP response headers.\n");
         free(header_buf);
         nurl_tls_free(tls);
         nurl_net_close(sock_fd);
@@ -277,7 +277,7 @@ int nurl_cmd_download(const char *url, const CommonArgs *common) {
     // Open output file
     FILE *out = fopen(filename, is_resume ? "ab" : "wb");
     if (!out) {
-        fprintf(stderr, "Error: Could not open file for writing: %s\n", filename);
+        fprintf(stderr, "nurl: (6) Could not open file for writing: %s\n", filename);
         nurl_tls_free(tls);
         nurl_net_close(sock_fd);
         free(filename); free(scheme); free(host); free(path);
@@ -303,7 +303,7 @@ int nurl_cmd_download(const char *url, const CommonArgs *common) {
     int n;
     while ((n = nurl_tls_read(tls, chunk, sizeof(chunk))) > 0) {
         if (fwrite(chunk, 1, n, out) != (size_t)n) {
-            fprintf(stderr, "\nError: Disk write failed.\n");
+            fprintf(stderr, "\nnurl: (6) Disk write failed.\n");
             fclose(out);
             nurl_tls_free(tls);
             nurl_net_close(sock_fd);
@@ -350,7 +350,7 @@ int nurl_cmd_download(const char *url, const CommonArgs *common) {
     nurl_net_close(sock_fd);
 
     if (!common->silent) {
-        fprintf(stderr, "\n+ Download complete: %s\n", filename);
+        fprintf(stderr, "\n* Download complete: %s\n", filename);
     }
 
     free(filename);

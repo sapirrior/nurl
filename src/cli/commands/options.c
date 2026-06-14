@@ -41,13 +41,13 @@ int nurl_cmd_options(const char *url, const CommonArgs *common) {
     int port = 0;
 
     if (nurl_utils_parse_url(url, &scheme, &host, &port, &path) != 0) {
-        fprintf(stderr, "Error: Invalid URL format: %s\n", url);
+        fprintf(stderr, "nurl: (4) Malformed URL: %s\n", url);
         return NURL_ERR_INVALID_URL;
     }
 
     int sock_fd = nurl_net_connect(host, port);
     if (sock_fd < 0) {
-        fprintf(stderr, "Error: Could not connect to host %s:%d\n", host, port);
+        fprintf(stderr, "nurl: (2) Could not connect to host %s:%d\n", host, port);
         free(scheme); free(host); free(path);
         return NURL_ERR_NETWORK;
     }
@@ -58,14 +58,19 @@ int nurl_cmd_options(const char *url, const CommonArgs *common) {
 
     nurl_tls_t *tls = nurl_tls_create(!common->no_verify, common->cacert);
     if (!tls) {
-        fprintf(stderr, "Error: Failed to initialize TLS context.\n");
+        fprintf(stderr, "nurl: (5) Failed to initialize TLS context.\n");
         nurl_net_close(sock_fd);
         free(scheme); free(host); free(path);
         return NURL_ERR_TLS;
     }
 
+    if (common->verbose && !common->silent) {
+        fprintf(stderr, "* Connected to %s port %d\n", host, port);
+        fprintf(stderr, "* TLS handshake complete\n*\n");
+    }
+
     if (nurl_tls_handshake(tls, sock_fd, host) != 0) {
-        fprintf(stderr, "Error: TLS verification failed.\n");
+        fprintf(stderr, "nurl: (5) TLS verification failed.\n");
         nurl_tls_free(tls);
         nurl_net_close(sock_fd);
         free(scheme); free(host); free(path);
@@ -114,7 +119,7 @@ int nurl_cmd_options(const char *url, const CommonArgs *common) {
     }
 
     if (oom) {
-        fprintf(stderr, "Error: Out of memory.\n");
+        fprintf(stderr, "nurl: (1) Out of memory preparing headers.\n");
         free(extra_hdr);
         nurl_tls_free(tls);
         nurl_net_close(sock_fd);
@@ -122,15 +127,47 @@ int nurl_cmd_options(const char *url, const CommonArgs *common) {
         return NURL_ERR_GENERIC;
     }
 
+    if (common->verbose && !common->silent) {
+        fprintf(stderr, "> OPTIONS %s HTTP/1.1\n", path);
+        fprintf(stderr, "> Host: %s\n", host);
+        fprintf(stderr, "> User-Agent: nurl/0.1.1\n");
+        fprintf(stderr, "> Connection: close\n");
+
+        char *hdr_copy = strdup(extra_hdr);
+        char *line = strtok(hdr_copy, "\r\n");
+        while (line) {
+            char *colon = strchr(line, ':');
+            if (colon) {
+                *colon = '\0';
+                char *key = line;
+                char *val = colon + 1;
+                while (*val && isspace((unsigned char)*val)) val++;
+                const char *redacted = nurl_utils_redact_header(key, val);
+                fprintf(stderr, "> %s: %s\n", key, redacted);
+            }
+            line = strtok(NULL, "\r\n");
+        }
+        free(hdr_copy);
+        fprintf(stderr, "> \n");
+    }
+
     nurl_http_response_t *res = nurl_http_request(tls, "OPTIONS", path, host, extra_hdr, NULL, 0);
     free(extra_hdr);
 
     if (!res) {
-        fprintf(stderr, "Error: HTTP OPTIONS request failed.\n");
+        fprintf(stderr, "nurl: (2) HTTP OPTIONS request failed.\n");
         nurl_tls_free(tls);
         nurl_net_close(sock_fd);
         free(scheme); free(host); free(path);
         return NURL_ERR_NETWORK;
+    }
+
+    if (common->verbose && !common->silent) {
+        fprintf(stderr, "< HTTP/1.1 %d %s\n", res->status_code, res->status_text);
+        for (size_t i = 0; i < res->header_count; i++) {
+            fprintf(stderr, "< %s\n", res->headers[i]);
+        }
+        fprintf(stderr, "< \n");
     }
 
     if (!common->silent) {

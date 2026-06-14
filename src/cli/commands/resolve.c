@@ -40,7 +40,7 @@ int nurl_cmd_resolve(const char *url_or_host, const CommonArgs *common) {
 
     int s = getaddrinfo(target_host, NULL, &hints, &result);
     if (s != 0) {
-        fprintf(stderr, "DNS resolution failed for '%s': %s\n", target_host, gai_strerror(s));
+        fprintf(stderr, "nurl: (2) DNS resolution failed for '%s': %s\n", target_host, gai_strerror(s));
         free(target_host);
         free(scheme); free(host); free(path);
         return 2;
