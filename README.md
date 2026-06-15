@@ -2,7 +2,7 @@
 
 NetworkURL (`nurl`) is a clean, fast, portable, and structured HTTP client CLI written in C. 
 
-Unlike traditional command-line HTTP clients that clutter the terminal with complex layouts, `nurl` is built with a simple design philosophy: **plain text, structured details, and machine-parseable outputs by default.**
+Unlike traditional command-line HTTP clients that clutter the terminal with complex layouts, `nurl` is built with a simple design philosophy: **plain text, structured details, and smart diagnostics by default.**
 
 ---
 
@@ -16,18 +16,39 @@ src/
 ├── cli/                    # CLI Interface Layer
 │   ├── parser/             # Argument parsing (nurl_cli.c)
 │   ├── runner/             # Subcommand routing & output styling (nurl_request.c)
-│   └── commands/           # HTTP command drivers (get.c, post.c, download.c, etc.)
-└── engine/                 # Protocol & Network Engine Layer
-    ├── nurl_engine.c       # Central engine request orchestrator
-    ├── net/                # TCP Socket & Proxy handler (Winsock/POSIX abstractions)
-    ├── tls/                # OpenSSL contexts & verification setup
-    ├── http/               # HTTP parser, gzip/deflate decompression, redirect resolution
-    └── utils/              # Cookies manager, configurations, base64 & high-res time utilities
+│   └── commands/           # HTTP command drivers (download.c, upload.c, ping.c, etc.)
+├── engine/                 # Protocol & Network Engine Layer
+│   ├── nurl_engine.c       # Central engine request orchestrator
+│   ├── net/                # TCP Socket & Proxy handler (Winsock/POSIX abstractions)
+│   ├── tls/                # OpenSSL contexts & verification setup
+│   ├── http/               # HTTP parser, gzip/deflate decompression, redirect resolution
+│   └── utils/              # Cookies manager, configurations, base64 & high-res time utilities
+└── errors/                 # Smart Error DX Layer
+    ├── nurl_diag.c         # Standardized block-formatted output
+    ├── nurl_error_handler.c # Context-aware diagnostic logic
+    └── nurl_error.c        # Centralized error code definitions
 ```
 
 ---
 
-## 2. Build Instructions
+## 2. Smart Error DX (Developer Experience)
+
+`nurl` features a context-aware diagnostic system designed to help you solve issues quickly. Instead of cryptic error codes, you get clear, unindented plain-text blocks:
+
+```text
+[ Error ]
+Network connection reset or interrupted during the request to 'https://api.example.com'.
+
+[ Hint ]
+Check your internet connection or verify if the server is reachable.
+
+[ Suggestion ]
+Since you are downloading a file to disk, you can attempt to pick up where you left off by adding the --resume flag.
+```
+
+---
+
+## 3. Build Instructions
 
 ### Prerequisites
 Make sure you have GCC/Clang, `libssl-dev` (OpenSSL), and `zlib1g-dev` installed.
@@ -43,16 +64,16 @@ make
 The [Makefile](Makefile) is tuned for production-grade builds:
 *   **Static Linking**: Links `libssl` and `libcrypto` statically (`-Wl,-Bstatic -lssl -lcrypto`), producing an executable with zero external OpenSSL dependencies.
 *   **Size Optimization**: Compiled with `-Os` (size optimization), `-ffunction-sections`, and `-fdata-sections`.
-*   **Zero Bloat**: By removing HTTP/2 and HTTP/3 framing libraries, the final binary remains lean and focused.
+*   **Zero Bloat**: By strictly focusing on HTTP/1.1 and removing legacy dependencies, the binary remains lean and high-performance.
 *   **Dead Code Elimination**: The linker removes unused functions at link time via `-Wl,--gc-sections -s`, stripping all symbols to keep the final executable size compact (~2.5MB total, including OpenSSL).
 
 ---
 
-## 3. Command Usage Guide
+## 4. Command Usage Guide
 
 Instead of compiling complex command flags, `nurl` uses focused, readable subcommands:
 
-### 3.1. Standard REST Operations
+### 4.1. Standard REST Operations
 
 #### GET Request
 ```bash
@@ -74,7 +95,7 @@ nurl delete https://httpbin.org/delete
 
 ---
 
-### 3.2. File Transfer Operations
+### 4.2. File Transfer Operations
 
 #### Streaming Downloads (With Auto-Resume)
 Download files directly to disk without buffering the entire payload in memory. If a transfer disconnects, pick up exactly where it stopped:
@@ -89,7 +110,7 @@ nurl upload https://api.example.com/media ./image.jpg --field user_id="101" --na
 
 ---
 
-### 3.3. First-Class Stdin & Stdout Piping (Like curl)
+### 4.3. First-Class Stdin & Stdout Piping (Like curl)
 
 `nurl` supports stdin/stdout streams out of the box, making it fully compatible with Unix pipes:
 
@@ -109,7 +130,7 @@ cat image.png | nurl post https://api.example.com/upload -d -
 
 ---
 
-### 3.4. Debugging & Inspection
+### 4.4. Debugging & Inspection
 
 #### Latency Analysis (Ping)
 Check host response times over TLS/TCP:
@@ -131,7 +152,7 @@ nurl resolve httpbin.org
 
 ---
 
-## 4. Advanced Options Reference
+## 5. Advanced Options Reference
 
 | Flag / Option | Description |
 | :--- | :--- |
@@ -147,7 +168,7 @@ nurl resolve httpbin.org
 
 ---
 
-## 5. Protocol Support
+## 6. Protocol Support
 
 `nurl` is built as an exclusive, highly-optimized **HTTP/1.1** client. 
 
@@ -159,7 +180,7 @@ By focusing on a rock-solid, manual implementation of the HTTP/1.1 state machine
 
 ---
 
-## 6. Cross-Platform Compatibility
+## 7. Cross-Platform Compatibility
 
 `nurl` is designed to compile natively and run identically on **Linux, macOS, and Windows**:
 *   **Windows (Winsock)**: Automatically initializes socket subsystems using `WSAStartup`/`WSACleanup` and handles socket read/write calls using Winsock2 abstractions.
