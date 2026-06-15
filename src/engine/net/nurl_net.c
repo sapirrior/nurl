@@ -273,3 +273,44 @@ int nurl_net_connect_proxy(
 
     return socket_fd;
 }
+
+int nurl_net_connect_udp(const char *hostname, int port) {
+    char port_str[16];
+    snprintf(port_str, sizeof(port_str), "%d", port);
+
+    struct addrinfo hints;
+    struct addrinfo *result, *rp;
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_DGRAM; /* UDP socket */
+    hints.ai_flags = 0;
+    hints.ai_protocol = 0;
+
+    int s = getaddrinfo(hostname, port_str, &hints, &result);
+    if (s != 0) {
+        return -1;
+    }
+
+    int socket_fd = -1;
+    for (rp = result; rp != NULL; rp = rp->ai_next) {
+#ifdef _WIN32
+        socket_fd = (int)socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+#else
+        socket_fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+#endif
+        if (socket_fd == -1) {
+            continue;
+        }
+
+        if (connect(socket_fd, rp->ai_addr, rp->ai_addrlen) != -1) {
+            break; /* Connected successfully */
+        }
+
+        socket_close(socket_fd);
+        socket_fd = -1;
+    }
+
+    freeaddrinfo(result);
+    return socket_fd;
+}

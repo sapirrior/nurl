@@ -67,6 +67,7 @@ void nurl_request_from_args(NurlRequest *req, const char *method, const char *ur
 
     req->resume = a->resume;
     req->progress = a->progress;
+    req->http3 = a->http3;
 }
 
 void nurl_request_free(NurlRequest *req) {

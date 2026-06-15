@@ -56,6 +56,7 @@ typedef struct {
     bool http10;
     bool http11;
     bool http2;
+    bool http3;
     char *proxy;
     char *proxy_user;
     char *no_proxy;

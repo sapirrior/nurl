@@ -36,4 +36,10 @@ int nurl_net_init(void);
  */
 void nurl_net_cleanup(void);
 
+/**
+ * Connects to a host over UDP for QUIC/HTTP3.
+ * Returns the socket file descriptor on success, or -1 on error.
+ */
+int nurl_net_connect_udp(const char *hostname, int port);
+
 #endif /* NURL_NET_H */

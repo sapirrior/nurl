@@ -5,6 +5,7 @@
 #include "nurl_utils.h"
 #include "nurl_http.h"
 #include "nurl_http2.h"
+#include "nurl_http3.h"
 #include "nurl_cookies.h"
 #include "nurl_decompress.h"
 #include "nurl_redirect.h"
@@ -61,6 +62,19 @@ int nurl_engine_execute_request(
             fprintf(stderr, "nurl: (5) nurl currently only supports HTTPS (TLS) requests.\n");
             free(scheme); free(host); free(path); free(current_url);
             return NURL_ERR_TLS;
+        }
+
+        if (req->http3) {
+            if (req->verbose && !req->silent) {
+                fprintf(stderr, "* Connecting to %s:%d via UDP for HTTP/3\n", host, port);
+            }
+            res = nurl_http3_request(req->method, path, host, port, NULL, req->body, req->body_len, req->body_parts, req->body_parts_count, req->out, req->progress, req->silent, req->resume_offset, req->tls_verify, req->cacert, req->cert, req->key);
+            if (!res) {
+                fprintf(stderr, "nurl: (2) HTTP/3 request failed.\n");
+                free(scheme); free(host); free(path); free(current_url);
+                return NURL_ERR_NETWORK;
+            }
+            break; // Skip rest of HTTP/1.1 or HTTP/2 loop since request is done
         }
 
         int sock_fd = -1;
