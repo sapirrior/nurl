@@ -95,6 +95,32 @@ static char *nurl_normalize_url(const char *raw) {
     return normalized;
 }
 
+static void nurl_cli_infer_method(const CommonArgs *args, char **command) {
+    if (args->method) {
+        free(*command);
+        *command = strdup(args->method);
+        return;
+    }
+
+    bool has_body = (args->data && strlen(args->data) > 0)
+                  || args->json
+                  || (args->form && args->form_count > 0);
+
+    bool has_upload = (args->upload_file && strlen(args->upload_file) > 0);
+
+    if (has_upload) {
+        free(*command);
+        *command = strdup("upload");
+        return;
+    }
+
+    if (has_body) {
+        free(*command);
+        *command = strdup("post");
+        return;
+    }
+}
+
 int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char **url) {
     nurl_cli_init_args(args);
 
@@ -141,13 +167,15 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
         {"fail",            no_argument,       NULL, 'f'},
         {"tls1.2",          no_argument,       NULL, 21},
         {"tls1.3",          no_argument,       NULL, 22},
+        {"request",         required_argument, NULL, 'X'},
+        {"upload",          required_argument, NULL, 23},
         {NULL, 0, NULL, 0}
     };
 
     int opt;
     opterr = 0; // Disable default getopt error printing
 
-    while ((opt = getopt_long(argc, argv, "u:d:jt:LH:o:ivshkb:c:w:Vx:A:e:f", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "u:d:jt:LH:o:ivshkb:c:w:Vx:A:e:fX:", long_options, NULL)) != -1) {
         switch (opt) {
             case 'u':
                 if (args->user) free(args->user);
@@ -418,6 +446,22 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
             case 22:
                 args->tls13 = true;
                 break;
+            case 'X':
+                if (args->method) free(args->method);
+                args->method = strdup(optarg);
+                if (!args->method) {
+                    fprintf(stderr, "Error: Out of memory.\n");
+                    return -1;
+                }
+                break;
+            case 23:
+                if (args->upload_file) free(args->upload_file);
+                args->upload_file = strdup(optarg);
+                if (!args->upload_file) {
+                    fprintf(stderr, "Error: Out of memory.\n");
+                    return -1;
+                }
+                break;
             case 'V':
                 printf("nurl %s\n", NURL_VERSION);
                 exit(0);
@@ -452,34 +496,36 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
         return NURL_ERR_ARG;
     }
 
-    if (remaining >= 2) {
-        if (is_subcommand(first)) {
-            *command = strdup(first);
-            if (strcasecmp(first, "upload") == 0) {
-                if (remaining >= 3) {
-                    *url = strdup(argv[optind + 1]);
-                    args->upload_file = strdup(argv[optind + 2]);
-                } else {
-                    fprintf(stderr, "nurl: subcommand 'upload' requires target URL and local file path.\n");
-                    free(*command);
-                    *command = NULL;
-                    return -1;
-                }
-            } else {
+    if (is_subcommand(first)) {
+        *command = strdup(first);
+        if (strcasecmp(first, "upload") == 0) {
+            if (remaining >= 3) {
                 *url = strdup(argv[optind + 1]);
+                if (args->upload_file) free(args->upload_file);
+                args->upload_file = strdup(argv[optind + 2]);
+            } else if (remaining == 2 && args->upload_file) {
+                *url = strdup(argv[optind + 1]);
+            } else {
+                fprintf(stderr, "nurl: subcommand 'upload' requires target URL and local file path.\n");
+                free(*command);
+                *command = NULL;
+                return -1;
             }
         } else {
-            *command = strdup("get");
-            *url = strdup(first);
+            if (remaining >= 2) {
+                *url = strdup(argv[optind + 1]);
+            } else {
+                fprintf(stderr, "nurl: subcommand '%s' requires a target URL.\n", first);
+                free(*command);
+                *command = NULL;
+                return -1;
+            }
         }
     } else {
-        if (is_subcommand(first)) {
-            fprintf(stderr, "nurl: subcommand '%s' requires a target URL.\n", first);
-            return -1;
-        } else {
-            *command = strdup("get");
-            *url = strdup(first);
-        }
+        // Implicit mode (URL first)
+        *command = strdup("get");
+        *url = strdup(first);
+        nurl_cli_infer_method(args, command);
     }
 
     if (*url) {
@@ -493,6 +539,7 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
 
 void nurl_cli_free_args(CommonArgs *args) {
     if (args) {
+        free(args->method);
         free(args->user);
         free(args->bearer);
         free(args->token);
