@@ -69,8 +69,9 @@ int nurl_utils_parse_url(const char *url, char **scheme, char **host, int *port,
     }
     free(host_port);
 
-    if (!parsed_host) {
+    if (!parsed_host || strlen(parsed_host) == 0) {
         free(parsed_scheme);
+        free(parsed_host);
         return -1;
     }
 

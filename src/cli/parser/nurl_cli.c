@@ -83,6 +83,18 @@ static const char *suggest_command(const char *arg) {
     return NULL;
 }
 
+static char *nurl_normalize_url(const char *raw) {
+    if (!raw) return NULL;
+    /* Already has a scheme — pass through */
+    if (strstr(raw, "://")) return strdup(raw);
+    /* Prepend https:// for bare hostnames and host/path strings */
+    size_t len = strlen(raw);
+    char *normalized = malloc(len + 9); /* "https://" + NUL */
+    if (!normalized) return NULL;
+    snprintf(normalized, len + 9, "https://%s", raw);
+    return normalized;
+}
+
 int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char **url) {
     nurl_cli_init_args(args);
 
@@ -468,6 +480,12 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
             *command = strdup("get");
             *url = strdup(first);
         }
+    }
+
+    if (*url) {
+        char *norm = nurl_normalize_url(*url);
+        free(*url);
+        *url = norm;
     }
 
     return 0;
