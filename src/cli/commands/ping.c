@@ -3,6 +3,7 @@
 #include "nurl_tls.h"
 #include "nurl_utils.h"
 #include "nurl_http.h"
+#include "errors/nurl_diag.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,7 +42,8 @@ int nurl_cmd_ping(const char *url, const CommonArgs *common) {
     int port = 0;
 
     if (nurl_utils_parse_url(url, &scheme, &host, &port, &path) != 0) {
-        fprintf(stderr, "nurl: (4) Malformed URL: %s\n", url);
+        nurl_diag_block("Error", "Malformed URL '%s' provided for ping.", url);
+        nurl_diag_block("Hint", "Ensure the URL uses a supported scheme like 'https://' and has a valid hostname.");
         return NURL_ERR_INVALID_URL;
     }
 
@@ -52,7 +54,8 @@ int nurl_cmd_ping(const char *url, const CommonArgs *common) {
     nurl_tls_t *tls = NULL;
 
     if (connect_and_handshake(host, port, common, &sock_fd, &tls) != 0) {
-        fprintf(stderr, "nurl: (5) Initial TLS connection failed for %s\n", host);
+        nurl_diag_block("Error", "Initial TLS connection failed for '%s'.", host);
+        nurl_diag_block("Hint", "Verify the host is reachable and the certificate is valid, or use --no-verify.");
         free(scheme); free(host); free(path);
         return NURL_ERR_TLS;
     }

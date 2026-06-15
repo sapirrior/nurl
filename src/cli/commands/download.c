@@ -5,6 +5,8 @@
 #include "nurl_http.h"
 #include "nurl_engine.h"
 #include "request.h"
+#include "errors/nurl_error_handler.h"
+#include "errors/nurl_diag.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,7 +22,8 @@ int nurl_cmd_download(const char *url, const CommonArgs *common) {
     int port = 0;
 
     if (nurl_utils_parse_url(url, &scheme, &host, &port, &path) != 0) {
-        fprintf(stderr, "nurl: (4) Malformed URL: %s\n", url);
+        nurl_diag_block("Error", "Malformed URL '%s' provided for download.", url);
+        nurl_diag_block("Hint", "Ensure the URL uses a supported scheme like 'https://' and has a valid hostname.");
         return NURL_ERR_INVALID_URL;
     }
 
@@ -67,9 +70,9 @@ int nurl_cmd_download(const char *url, const CommonArgs *common) {
 
     // Verbose notice
     if (!common->silent) {
-        fprintf(stderr, "* Downloading %s\n", filename);
+        fprintf(stderr, "* Saving to: %s\n", filename);
         if (start_pos > 0) {
-            fprintf(stderr, "* Resuming from offset: %lu\n", start_pos);
+            nurl_diag_block("Info", "Resuming download from offset: %lu", start_pos);
         }
     }
 
@@ -108,7 +111,8 @@ int nurl_cmd_download(const char *url, const CommonArgs *common) {
             out = fopen(filename, (current_offset > 0) ? "ab" : "wb");
         }
         if (!out) {
-            fprintf(stderr, "nurl: (6) Could not open file for writing: %s\n", filename);
+            nurl_diag_block("Error", "Could not open local file '%s' for writing.", filename);
+            nurl_diag_block("Hint", "Check your file permissions or verify that the directory exists.");
             nurl_request_free(req);
             free(filename); free(scheme); free(host); free(path);
             return NURL_ERR_WRITE;
@@ -153,6 +157,16 @@ int nurl_cmd_download(const char *url, const CommonArgs *common) {
             ret_code = NURL_ERR_STATUS_5XX;
         } else if (res->status_code >= 400) {
             ret_code = NURL_ERR_STATUS_4XX;
+        }
+    }
+
+    if (engine_err != NURL_OK) {
+        if (!common->silent) {
+            nurl_handle_request_error(engine_err, req, effective_url ? effective_url : url);
+        }
+    } else if (res && res->status_code >= 400) {
+        if (!common->silent) {
+            nurl_handle_request_error((res->status_code >= 500) ? NURL_ERR_HTTP_5XX : NURL_ERR_HTTP_4XX, req, effective_url ? effective_url : url);
         }
     }
 

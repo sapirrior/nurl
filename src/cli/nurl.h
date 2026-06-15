@@ -2,7 +2,7 @@
 #define NURL_H
 
 #ifndef NURL_VERSION
-#define NURL_VERSION "0.2.0"
+#define NURL_VERSION "0.2.2"
 #endif
 
 #include <stdbool.h>
@@ -53,8 +53,6 @@ typedef struct {
     char **header;
     size_t header_count;
     bool compressed;
-    bool http10;
-    bool http11;
     char *proxy;
     char *proxy_user;
     char *no_proxy;

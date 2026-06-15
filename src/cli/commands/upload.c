@@ -5,6 +5,8 @@
 #include "nurl_http.h"
 #include "nurl_engine.h"
 #include "request.h"
+#include "errors/nurl_error_handler.h"
+#include "errors/nurl_diag.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,13 +17,15 @@
 
 int nurl_cmd_upload(const char *url, const CommonArgs *common) {
     if (!common->upload_file) {
-        fprintf(stderr, "nurl: (1) No upload file specified.\n");
+        nurl_diag_block("Error", "No upload file specified.");
+        nurl_diag_block("Hint", "Use the --upload flag followed by the path to the file you wish to send.");
         return NURL_ERR_GENERIC;
     }
 
     struct stat st;
     if (stat(common->upload_file, &st) != 0 || !S_ISREG(st.st_mode)) {
-        fprintf(stderr, "nurl: (6) Could not read upload file '%s'\n", common->upload_file);
+        nurl_diag_block("Error", "Could not read local upload file '%s'.", common->upload_file);
+        nurl_diag_block("Hint", "Ensure the file exists and you have proper read permissions.");
         return NURL_ERR_WRITE;
     }
     long fsize = st.st_size;
@@ -98,152 +102,94 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
     preamble_len += snprintf(preamble + preamble_len, preamble_cap - preamble_len, "Content-Type: %s\r\n\r\n", mime_type);
 
     // Build multipart epilogue
-    // Wait, the boundary is close boundary: "--boundary--\r\n"
-    char epilogue_buf[128];
-    snprintf(epilogue_buf, sizeof(epilogue_buf), "\r\n--%s--\r\n", boundary);
+    char epilogue[256];
+    size_t epilogue_len = snprintf(epilogue, sizeof(epilogue), "\r\n--%s--\r\n", boundary);
 
-    // Set up body parts
     NurlBodyPart parts[3];
-    parts[0].type = NURL_BODY_PART_MEM;
-    parts[0].data = (const uint8_t *)preamble;
-    parts[0].len = preamble_len;
-    parts[0].filepath = NULL;
+    memset(parts, 0, sizeof(parts));
 
-    parts[1].type = NURL_BODY_PART_FILE;
-    parts[1].data = NULL;
-    parts[1].len = fsize;
-    parts[1].filepath = common->upload_file;
+    parts[0].type = NURL_BODY_PART_MEM;
+    parts[0].data = (uint8_t *)preamble;
+    parts[0].len  = preamble_len;
+
+    parts[1].type     = NURL_BODY_PART_FILE;
+    parts[1].filepath = strdup(common->upload_file);
+    parts[1].len      = (size_t)fsize;
 
     parts[2].type = NURL_BODY_PART_MEM;
-    parts[2].data = (const uint8_t *)epilogue_buf;
-    parts[2].len = strlen(epilogue_buf);
-    parts[2].filepath = NULL;
+    parts[2].data = (uint8_t *)strdup(epilogue);
+    parts[2].len  = epilogue_len;
 
-    // Create and execute NurlRequest
     NurlRequest *req = nurl_request_new();
     if (!req) {
         free(preamble);
+        free((void *)parts[1].filepath);
+        free((void *)parts[2].data);
         return NURL_ERR_OOM;
     }
 
     nurl_request_from_args(req, "POST", url, common);
     
-    // Add Content-Type multipart header
-    char ct_val[256];
-    snprintf(ct_val, sizeof(ct_val), "multipart/form-data; boundary=%s", boundary);
-    nurl_headermap_set(req->headers, "Content-Type", ct_val);
+    char content_type[128];
+    snprintf(content_type, sizeof(content_type), "multipart/form-data; boundary=%s", boundary);
+    if (req->headers) {
+        nurl_headermap_set(req->headers, "Content-Type", content_type);
+    }
 
     req->body_parts = malloc(sizeof(NurlBodyPart) * 3);
     if (!req->body_parts) {
-        free(preamble);
         nurl_request_free(req);
+        free(preamble);
+        free((void *)parts[1].filepath);
+        free((void *)parts[2].data);
         return NURL_ERR_OOM;
     }
     memcpy(req->body_parts, parts, sizeof(NurlBodyPart) * 3);
     req->body_parts_count = 3;
 
-    unsigned int max_retries = common->retry;
-    unsigned long delay_sec = common->retry_delay > 0 ? common->retry_delay : 1;
-    int engine_err = NURL_OK;
     nurl_http_response_t *res = NULL;
     char *effective_url = NULL;
 
-    for (unsigned int attempt = 0; attempt <= max_retries; attempt++) {
-        if (res) {
-            nurl_http_response_free(res);
-            res = NULL;
-        }
-        if (effective_url) {
-            free(effective_url);
-            effective_url = NULL;
-        }
+    if (!common->silent) {
+        fprintf(stderr, "* Uploading %s (%ld bytes)\n", common->upload_file, fsize);
+    }
 
-        engine_err = nurl_engine_execute_request(req, &res, &effective_url);
+    int err = nurl_engine_execute_request(req, &res, &effective_url);
 
-        if (engine_err == NURL_OK && res) {
-            if (res->status_code < 500) {
-                break;
-            } else {
-                if (attempt < max_retries && !common->silent) {
-                    fprintf(stderr, "nurl: Warning: HTTP %d. Retrying in %lu seconds...\n", res->status_code, delay_sec);
-                }
-            }
-        } else {
-            if (attempt < max_retries && !common->silent) {
-                fprintf(stderr, "nurl: Warning: Request failed (error %d). Retrying in %lu seconds...\n", engine_err, delay_sec);
-            }
+    if (err != NURL_OK) {
+        if (!common->silent) {
+            nurl_handle_request_error(err, req, effective_url ? effective_url : url);
         }
-
-        if (attempt < max_retries) {
-            sleep(delay_sec);
+    } else if (res && res->status_code >= 400) {
+        if (!common->silent) {
+            nurl_handle_request_error((res->status_code >= 500) ? NURL_ERR_HTTP_5XX : NURL_ERR_HTTP_4XX, req, effective_url ? effective_url : url);
         }
     }
 
-    free(preamble);
-
-    if (engine_err != NURL_OK) {
-        if (effective_url) free(effective_url);
-        nurl_request_free(req);
-        return engine_err;
-    }
-
-    if (!res) {
-        if (effective_url) free(effective_url);
-        nurl_request_free(req);
-        return NURL_ERR_GENERIC;
-    }
-
-    bool should_suppress_output = (common->fail && res->status_code >= 400);
-    if (!should_suppress_output) {
-        if (common->include && !common->verbose) {
-            printf("HTTP/1.1 %d %s\n", res->status_code, res->status_text);
-            for (size_t i = 0; i < res->header_count; i++) {
-                printf("%s\n", res->headers[i]);
-            }
-            printf("\n");
+    int ret_code = err;
+    if (err == NURL_OK && res) {
+        if (res->status_code >= 500) {
+            ret_code = NURL_ERR_STATUS_5XX;
+        } else if (res->status_code >= 400) {
+            ret_code = NURL_ERR_STATUS_4XX;
         }
-
-        if (common->output) {
-            bool is_stdout = (strcmp(common->output, "-") == 0);
-            FILE *out_f = NULL;
-            if (is_stdout) {
-                out_f = stdout;
-            } else {
-                out_f = fopen(common->output, "wb");
-            }
-            if (!out_f) {
-                fprintf(stderr, "nurl: (6) Could not open file for writing: %s\n", common->output);
-                nurl_http_response_free(res);
-                free(effective_url);
-                nurl_request_free(req);
-                return NURL_ERR_WRITE;
-            }
-            if (res->body_len > 0) {
-                fwrite(res->body, 1, res->body_len, out_f);
-            }
-            if (!is_stdout) {
-                fclose(out_f);
-            } else {
-                fflush(out_f);
-            }
-        } else {
+        
+        if (!common->silent && !common->fail) {
             if (res->body_len > 0) {
                 fwrite(res->body, 1, res->body_len, stdout);
             }
         }
     }
 
-    int ret_code = NURL_OK;
-    if (res->status_code >= 500) {
-        ret_code = NURL_ERR_STATUS_5XX;
-    } else if (res->status_code >= 400) {
-        ret_code = NURL_ERR_STATUS_4XX;
-    }
-
-    nurl_http_response_free(res);
-    if (effective_url) {
-        free(effective_url);
-    }
     nurl_request_free(req);
+    if (res) nurl_http_response_free(res);
+    if (effective_url) free(effective_url);
+    free(preamble);
+    // Note: nurl_request_free only frees req->body_parts array, not the pointers inside NurlBodyPart
+    // We should probably fix nurl_request_free to handle this or free here.
+    // For now, let's free them here to be safe.
+    free((void *)parts[1].filepath);
+    free((void *)parts[2].data);
+
     return ret_code;
 }

@@ -1,5 +1,6 @@
 #include "commands.h"
 #include "nurl_utils.h"
+#include "errors/nurl_diag.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,7 +24,8 @@ int nurl_cmd_inspect(const char *url, const CommonArgs *common) {
     int port = 0;
 
     if (nurl_utils_parse_url(url, &scheme, &host, &port, &path) != 0) {
-        fprintf(stderr, "Error: Invalid URL format: %s\n", url);
+        nurl_diag_block("Error", "Malformed URL '%s' provided for inspection.", url);
+        nurl_diag_block("Hint", "Ensure the URL uses a supported scheme like 'https://' and has a valid hostname.");
         return NURL_ERR_INVALID_URL;
     }
 

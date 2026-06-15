@@ -4,6 +4,7 @@
 #include "nurl_utils.h"
 #include "nurl_http.h"
 #include "errors/nurl_error_handler.h"
+#include "errors/nurl_diag.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -42,13 +43,16 @@ int nurl_cmd_options(const char *url, const CommonArgs *common) {
     int port = 0;
 
     if (nurl_utils_parse_url(url, &scheme, &host, &port, &path) != 0) {
-        fprintf(stderr, "nurl: (4) Malformed URL: %s\n", url);
+        nurl_diag_block("Error", "Malformed URL '%s' provided for OPTIONS request.", url);
+        nurl_diag_block("Hint", "Ensure the URL uses a supported scheme like 'https://' and has a valid hostname.");
         return NURL_ERR_INVALID_URL;
     }
 
     int sock_fd = nurl_net_connect_proxy(host, port, common->proxy, common->proxy_user, common->no_proxy);
     if (sock_fd < 0) {
-        fprintf(stderr, "nurl: (2) Could not connect to host %s:%d\n", host, port);
+        if (!common->silent) {
+            nurl_handle_request_error(NURL_ERR_NETWORK, NULL, url);
+        }
         free(scheme); free(host); free(path);
         return NURL_ERR_NETWORK;
     }
@@ -59,7 +63,9 @@ int nurl_cmd_options(const char *url, const CommonArgs *common) {
 
     nurl_tls_t *tls = nurl_tls_create(!common->no_verify, common->cacert, common->cert, common->key, common->tls12, common->tls13);
     if (!tls) {
-        fprintf(stderr, "nurl: (5) Failed to initialize TLS context.\n");
+        if (!common->silent) {
+            nurl_handle_request_error(NURL_ERR_TLS, NULL, url);
+        }
         nurl_net_close(sock_fd);
         free(scheme); free(host); free(path);
         return NURL_ERR_TLS;
@@ -71,7 +77,9 @@ int nurl_cmd_options(const char *url, const CommonArgs *common) {
     }
 
     if (nurl_tls_handshake(tls, sock_fd, host) != 0) {
-        fprintf(stderr, "nurl: (5) TLS verification failed.\n");
+        if (!common->silent) {
+            nurl_handle_request_error(NURL_ERR_TLS, NULL, url);
+        }
         nurl_tls_free(tls);
         nurl_net_close(sock_fd);
         free(scheme); free(host); free(path);
