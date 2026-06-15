@@ -2,6 +2,7 @@
 #include "nurl_engine.h"
 #include "request.h"
 #include "nurl_utils.h"
+#include "errors/nurl_error_handler.h"
 #include <sys/time.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -166,12 +167,16 @@ int nurl_request_generic(const char *method, const char *url, const CommonArgs *
         }
     }
 
-    nurl_request_free(req);
-
     if (engine_err != NURL_OK) {
+        if (!common->silent) {
+            nurl_handle_request_error(engine_err, req, effective_url ? effective_url : url);
+        }
+        nurl_request_free(req);
         if (effective_url) free(effective_url);
         return engine_err;
     }
+
+    nurl_request_free(req);
 
     if (!res) {
         if (effective_url) free(effective_url);

@@ -3,6 +3,7 @@
 #include "nurl_tls.h"
 #include "nurl_utils.h"
 #include "nurl_http.h"
+#include "errors/nurl_error_handler.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -164,12 +165,8 @@ int nurl_cmd_options(const char *url, const CommonArgs *common) {
     free(extra_hdr);
 
     if (exec_err != NURL_OK) {
-        if (exec_err == NURL_ERR_NETWORK) {
-            fprintf(stderr, "nurl: (%d) Network connection reset or interrupted during OPTIONS request.\n", exec_err);
-        } else if (exec_err == NURL_ERR_OOM) {
-            fprintf(stderr, "nurl: (%d) Out of memory during OPTIONS request.\n", exec_err);
-        } else {
-            fprintf(stderr, "nurl: (%d) HTTP OPTIONS request failed.\n", exec_err);
+        if (!common->silent) {
+            nurl_handle_request_error(exec_err, NULL, url);
         }
         nurl_tls_free(tls);
         nurl_net_close(sock_fd);

@@ -97,6 +97,6 @@ typedef struct {
     size_t upload_fields_count;
 } CommonArgs;
 
-#include "engine/utils/nurl_error.h"
+#include "errors/nurl_error.h"
 
 #endif /* NURL_H */

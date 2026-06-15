@@ -13,7 +13,7 @@ typedef struct {
     size_t body_len;
 } nurl_http_response_t;
 
-#include "engine/utils/nurl_error.h"
+#include "errors/nurl_error.h"
 
 /**
  * Sends a structured HTTP/1.1 request via the provided active TLS channel.

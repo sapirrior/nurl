@@ -1,5 +1,5 @@
 #include "nurl_cli.h"
-#include "engine/utils/nurl_error.h"
+#include "errors/nurl_error.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

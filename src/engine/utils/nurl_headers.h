@@ -2,7 +2,7 @@
 #define NURL_HEADERS_H
 
 #include "nurl.h"
-#include "engine/utils/nurl_error.h"
+#include "errors/nurl_error.h"
 #include <stdbool.h>
 #include <stddef.h>
 

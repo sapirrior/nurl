@@ -50,16 +50,14 @@ int nurl_engine_execute_request(
         int port = 0;
 
         if (nurl_utils_parse_url(current_url, &scheme, &host, &port, &path) != 0) {
-            fprintf(stderr, "nurl: (4) Malformed URL: %s\n", current_url);
             free(current_url);
             return NURL_ERR_INVALID_URL;
         }
 
         bool use_tls = (strcmp(scheme, "https") == 0);
         if (!use_tls) {
-            fprintf(stderr, "nurl: (5) nurl currently only supports HTTPS (TLS) requests.\n");
             free(scheme); free(host); free(path); free(current_url);
-            return NURL_ERR_TLS;
+            return NURL_ERR_INVALID_URL;
         }
 
         int sock_fd = -1;
@@ -67,14 +65,12 @@ int nurl_engine_execute_request(
 
         if (req->pool) {
             if (nurl_pool_acquire(req->pool, host, port, req, &sock_fd, &tls) != 0) {
-                fprintf(stderr, "nurl: (2) Could not connect to host %s:%d\n", host, port);
                 free(scheme); free(host); free(path); free(current_url);
                 return NURL_ERR_NETWORK;
             }
         } else {
             sock_fd = nurl_net_connect_proxy(host, port, req->proxy, req->proxy_user, req->no_proxy);
             if (sock_fd < 0) {
-                fprintf(stderr, "nurl: (2) Could not connect to host %s:%d\n", host, port);
                 free(scheme); free(host); free(path); free(current_url);
                 return NURL_ERR_NETWORK;
             }
@@ -85,14 +81,12 @@ int nurl_engine_execute_request(
 
             tls = nurl_tls_create(req->tls_verify, req->cacert, req->cert, req->key, req->tls_version == 12, req->tls_version == 13);
             if (!tls) {
-                fprintf(stderr, "nurl: (5) Failed to initialize TLS context.\n");
                 nurl_net_close(sock_fd);
                 free(scheme); free(host); free(path); free(current_url);
                 return NURL_ERR_TLS;
             }
 
             if (nurl_tls_handshake(tls, sock_fd, host) != 0) {
-                fprintf(stderr, "nurl: (5) TLS verification failed.\n");
                 nurl_tls_free(tls);
                 nurl_net_close(sock_fd);
                 free(scheme); free(host); free(path); free(current_url);
@@ -226,16 +220,6 @@ int nurl_engine_execute_request(
         free(extra_hdr);
 
         if (exec_err != NURL_OK) {
-            if (exec_err == NURL_ERR_NETWORK) {
-                fprintf(stderr, "nurl: (%d) Network connection reset or interrupted.\n", exec_err);
-            } else if (exec_err == NURL_ERR_OOM) {
-                fprintf(stderr, "nurl: (%d) Out of memory during request processing.\n", exec_err);
-            } else if (exec_err == NURL_ERR_IO) {
-                fprintf(stderr, "nurl: (%d) Local I/O error reading body payload.\n", exec_err);
-            } else {
-                fprintf(stderr, "nurl: (%d) HTTP request failed.\n", exec_err);
-            }
-
             if (req->pool) {
                 nurl_pool_evict(req->pool, sock_fd);
             } else {

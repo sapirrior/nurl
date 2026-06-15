@@ -3,7 +3,7 @@ VERSION ?= 0.2.1
 CFLAGS  = -std=c11 -Wall -Wextra -Os -ffunction-sections -fdata-sections \
           -fno-ident -D_GNU_SOURCE -DNURL_VERSION=\"$(VERSION)\" \
           -Isrc -Isrc/cli -Isrc/cli/parser -Isrc/cli/runner -Isrc/cli/commands \
-          -Isrc/engine -Isrc/engine/net -Isrc/engine/tls -Isrc/engine/http -Isrc/engine/utils -Isrc/compat
+          -Isrc/engine -Isrc/engine/net -Isrc/engine/tls -Isrc/engine/http -Isrc/engine/utils -Isrc/compat -Isrc/errors
 LDFLAGS = -Wl,-Bstatic -lssl -lcrypto -Wl,-Bdynamic -lpthread -ldl -lz \
           -Wl,--gc-sections -s
 
