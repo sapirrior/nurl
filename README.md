@@ -146,8 +146,21 @@ nurl resolve httpbin.org
 
 ---
 
-## 5. Cross-Platform Compatibility
+## 5. Protocol Support
+
+`nurl` supports modern HTTP protocol versions out of the box, with ALPN-negotiated fallbacks:
+*   **HTTP/1.1**: Default fallback protocol.
+*   **HTTP/2**: Integrated multiplexed engine via `nghttp2` (negotiated automatically via ALPN).
+*   **HTTP/3 (QUIC)**: Supported via `--http3` flag (built on the `ngtcp2` + `nghttp3` frame layout). To force HTTP/3:
+    ```bash
+    nurl get https://nghttp2.org/httpbin/headers --http3 -v
+    ```
+
+---
+
+## 6. Cross-Platform Compatibility
 
 `nurl` is designed to compile natively and run identically on **Linux, macOS, and Windows**:
 *   **Windows (Winsock)**: Automatically initializes socket subsystems using `WSAStartup`/`WSACleanup` and handles socket read/write calls using Winsock2 abstractions.
 *   **High-Resolution Timers**: Tracks request elapsed times accurately on Windows (using `FILETIME`) and Unix-like OSes (using `gettimeofday`).
+*   **Async Event Loop Engine**: Wraps `poll()` on POSIX platforms and `WSAPoll()` on Windows to support non-blocking connections gracefully.
