@@ -165,3 +165,150 @@ void nurl_headers_free(NurlHeaderList *h) {
     }
     free(h);
 }
+
+static void canonicalize_header_key(char *key) {
+    bool cap_next = true;
+    for (char *p = key; *p; p++) {
+        if (*p == '-') {
+            cap_next = true;
+        } else if (cap_next) {
+            *p = toupper((unsigned char)*p);
+            cap_next = false;
+        } else {
+            *p = tolower((unsigned char)*p);
+        }
+    }
+}
+
+NurlHeaderMap *nurl_headermap_new(void) {
+    NurlHeaderMap *m = malloc(sizeof(NurlHeaderMap));
+    if (!m) return NULL;
+    m->keys = NULL;
+    m->values = NULL;
+    m->count = 0;
+    m->capacity = 0;
+    return m;
+}
+
+static nurl_err_t headermap_grow(NurlHeaderMap *m) {
+    if (m->count >= m->capacity) {
+        size_t new_cap = m->capacity == 0 ? 8 : m->capacity * 2;
+        char **new_keys = realloc(m->keys, new_cap * sizeof(char *));
+        char **new_values = realloc(m->values, new_cap * sizeof(char *));
+        if (!new_keys || !new_values) {
+            if (new_keys) m->keys = new_keys;
+            if (new_values) m->values = new_values;
+            return NURL_ERR_OOM;
+        }
+        m->keys = new_keys;
+        m->values = new_values;
+        m->capacity = new_cap;
+    }
+    return NURL_OK;
+}
+
+nurl_err_t nurl_headermap_set(NurlHeaderMap *m, const char *key, const char *value) {
+    if (!m || !key || !value) return NURL_ERR_GENERIC;
+
+    char *canon_key = strdup(key);
+    if (!canon_key) return NURL_ERR_OOM;
+    canonicalize_header_key(canon_key);
+
+    for (size_t i = 0; i < m->count; i++) {
+        if (strcasecmp(m->keys[i], canon_key) == 0) {
+            free(canon_key);
+            char *new_val = strdup(value);
+            if (!new_val) return NURL_ERR_OOM;
+            free(m->values[i]);
+            m->values[i] = new_val;
+            return NURL_OK;
+        }
+    }
+
+    if (headermap_grow(m) != NURL_OK) {
+        free(canon_key);
+        return NURL_ERR_OOM;
+    }
+
+    char *val_copy = strdup(value);
+    if (!val_copy) {
+        free(canon_key);
+        return NURL_ERR_OOM;
+    }
+
+    m->keys[m->count] = canon_key;
+    m->values[m->count] = val_copy;
+    m->count++;
+    return NURL_OK;
+}
+
+nurl_err_t nurl_headermap_append(NurlHeaderMap *m, const char *key, const char *value) {
+    if (!m || !key || !value) return NURL_ERR_GENERIC;
+
+    char *canon_key = strdup(key);
+    if (!canon_key) return NURL_ERR_OOM;
+    canonicalize_header_key(canon_key);
+
+    if (headermap_grow(m) != NURL_OK) {
+        free(canon_key);
+        return NURL_ERR_OOM;
+    }
+
+    char *val_copy = strdup(value);
+    if (!val_copy) {
+        free(canon_key);
+        return NURL_ERR_OOM;
+    }
+
+    m->keys[m->count] = canon_key;
+    m->values[m->count] = val_copy;
+    m->count++;
+    return NURL_OK;
+}
+
+bool nurl_headermap_has(const NurlHeaderMap *m, const char *key) {
+    if (!m || !key) return false;
+    for (size_t i = 0; i < m->count; i++) {
+        if (strcasecmp(m->keys[i], key) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+char *nurl_headermap_serialize(const NurlHeaderMap *m) {
+    if (!m || m->count == 0) {
+        char *empty = malloc(1);
+        if (empty) empty[0] = '\0';
+        return empty;
+    }
+
+    size_t total_len = 0;
+    for (size_t i = 0; i < m->count; i++) {
+        total_len += strlen(m->keys[i]) + strlen(m->values[i]) + 4;
+    }
+
+    char *buf = malloc(total_len + 1);
+    if (!buf) return NULL;
+
+    size_t offset = 0;
+    for (size_t i = 0; i < m->count; i++) {
+        size_t len = sprintf(buf + offset, "%s: %s\r\n", m->keys[i], m->values[i]);
+        offset += len;
+    }
+    buf[total_len] = '\0';
+    return buf;
+}
+
+void nurl_headermap_free(NurlHeaderMap *m) {
+    if (!m) return;
+    if (m->keys) {
+        for (size_t i = 0; i < m->count; i++) {
+            free(m->keys[i]);
+            free(m->values[i]);
+        }
+        free(m->keys);
+        free(m->values);
+    }
+    free(m);
+}
