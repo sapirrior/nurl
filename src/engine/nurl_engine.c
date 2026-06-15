@@ -4,6 +4,7 @@
 #include "nurl_pool.h"
 #include "nurl_utils.h"
 #include "nurl_http.h"
+#include "nurl_http2.h"
 #include "nurl_cookies.h"
 #include "nurl_decompress.h"
 #include "nurl_redirect.h"
@@ -196,12 +197,15 @@ int nurl_engine_execute_request(
             return NURL_ERR_OOM;
         }
 
+        const char *proto = nurl_tls_get_negotiated_proto(tls);
         if (req->verbose && !req->silent) {
             fprintf(stderr, "* Connected to %s port %d\n", host, port);
-            fprintf(stderr, "* TLS handshake complete\n*\n");
-            fprintf(stderr, "> %s %s HTTP/1.1\n", req->method, path);
+            fprintf(stderr, "* TLS handshake complete (ALPN: %s)\n*\n", proto ? proto : "none");
+            fprintf(stderr, "> %s %s %s\n", req->method, path, (proto && strcmp(proto, "h2") == 0) ? "HTTP/2" : "HTTP/1.1");
             fprintf(stderr, "> Host: %s\n", host);
-            fprintf(stderr, "> Connection: close\n");
+            if (!proto || strcmp(proto, "h2") != 0) {
+                fprintf(stderr, "> Connection: close\n");
+            }
 
             char *hdr_copy = strdup(extra_hdr);
             char *line = strtok(hdr_copy, "\r\n");
@@ -221,7 +225,11 @@ int nurl_engine_execute_request(
             fprintf(stderr, "> \n");
         }
 
-        res = nurl_http_request(tls, req->method, path, host, extra_hdr, req->body, req->body_len, req->body_parts, req->body_parts_count, req->out, req->progress, req->silent, req->resume_offset);
+        if (proto && strcmp(proto, "h2") == 0) {
+            res = nurl_http2_request(tls, req->method, path, host, extra_hdr, req->body, req->body_len, req->body_parts, req->body_parts_count, req->out, req->progress, req->silent, req->resume_offset);
+        } else {
+            res = nurl_http_request(tls, req->method, path, host, extra_hdr, req->body, req->body_len, req->body_parts, req->body_parts_count, req->out, req->progress, req->silent, req->resume_offset);
+        }
         free(extra_hdr);
 
         if (!res) {
