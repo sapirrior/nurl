@@ -20,6 +20,7 @@ typedef struct {
 
     // Body
     char *data;
+    size_t data_len;
     bool json;
     char *data_binary;
     char *data_urlencode;

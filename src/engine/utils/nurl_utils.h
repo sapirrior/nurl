@@ -41,6 +41,13 @@ bool nurl_utils_append_hdr_str(char **buf, size_t *len, size_t *cap, const char 
 bool nurl_utils_has_header(char **headers, size_t count, const char *key);
 
 /**
+ * Reads the entire contents of standard input until EOF into a dynamically allocated buffer.
+ * Returns the null-terminated buffer, or NULL on OOM / error.
+ * The caller is responsible for freeing the returned pointer.
+ */
+char *nurl_utils_read_stdin(size_t *out_len);
+
+/**
  * Returns the current epoch time in seconds (high resolution).
  */
 double nurl_utils_get_time_sec(void);

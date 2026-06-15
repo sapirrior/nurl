@@ -114,6 +114,7 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
                     fprintf(stderr, "Error: Out of memory.\n");
                     return -1;
                 }
+                args->data_len = strlen(optarg);
                 break;
             case 'j':
                 args->json = true;

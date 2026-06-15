@@ -288,7 +288,8 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
     nurl_net_close(sock_fd);
     free(scheme); free(host); free(path);
 
-    if (!common->silent) {
+    bool should_suppress_output = (common->fail && res->status_code >= 400);
+    if (!should_suppress_output) {
         if (common->include && !common->verbose) {
             printf("HTTP/1.1 %d %s\n", res->status_code, res->status_text);
             for (size_t i = 0; i < res->header_count; i++) {
@@ -298,7 +299,13 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
         }
 
         if (common->output) {
-            FILE *out_f = fopen(common->output, "wb");
+            bool is_stdout = (strcmp(common->output, "-") == 0);
+            FILE *out_f = NULL;
+            if (is_stdout) {
+                out_f = stdout;
+            } else {
+                out_f = fopen(common->output, "wb");
+            }
             if (!out_f) {
                 fprintf(stderr, "nurl: (6) Could not open file for writing: %s\n", common->output);
                 nurl_http_response_free(res);
@@ -307,10 +314,14 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
             if (res->body_len > 0) {
                 fwrite(res->body, 1, res->body_len, out_f);
             }
-            fclose(out_f);
+            if (!is_stdout) {
+                fclose(out_f);
+            } else {
+                fflush(out_f);
+            }
         } else {
             if (res->body_len > 0) {
-                printf("%s\n", res->body);
+                fwrite(res->body, 1, res->body_len, stdout);
             }
         }
     }

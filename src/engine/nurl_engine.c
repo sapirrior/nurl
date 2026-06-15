@@ -263,7 +263,10 @@ int nurl_engine_execute_request(
         }
 
         const unsigned char *body_data = (const unsigned char *)common->data;
-        size_t body_len = common->data ? strlen(common->data) : 0;
+        size_t body_len = 0;
+        if (common->data) {
+            body_len = common->data_len > 0 ? common->data_len : strlen(common->data);
+        }
 
         res = nurl_http_request(tls, method, path, host, extra_hdr, body_data, body_len);
         free(extra_hdr);

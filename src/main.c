@@ -7,6 +7,15 @@
 #include "nurl_runner.h"
 #include "nurl_config.h"
 #include "nurl_net.h"
+#include "nurl_utils.h"
+
+#ifdef _WIN32
+#include <io.h>
+#define is_stdin_a_pipe() (!_isatty(_fileno(stdin)))
+#else
+#include <unistd.h>
+#define is_stdin_a_pipe() (!isatty(STDIN_FILENO))
+#endif
 
 static void print_help(const char *prog_name) {
     printf("NetworkURL (nurl) — A clean, fast, and structured HTTP client CLI\n\n");
@@ -81,6 +90,19 @@ int main(int argc, char **argv) {
     char *method = strdup(command);
     for (size_t i = 0; i < strlen(method); i++) {
         method[i] = (char)toupper((unsigned char)method[i]);
+    }
+
+    // If -d - is specified or (method is POST/PUT/PATCH and stdin is a pipe and no data is set)
+    bool is_write_method = (strcmp(method, "POST") == 0 || strcmp(method, "PUT") == 0 || strcmp(method, "PATCH") == 0);
+    bool explicit_stdin = (args.data && strcmp(args.data, "-") == 0);
+    if (explicit_stdin || (is_write_method && is_stdin_a_pipe() && !args.data)) {
+        size_t stdin_len = 0;
+        char *stdin_payload = nurl_utils_read_stdin(&stdin_len);
+        if (stdin_payload) {
+            if (args.data) free(args.data);
+            args.data = stdin_payload;
+            args.data_len = stdin_len;
+        }
     }
 
     int result = nurl_runner_execute(method, url, &args);

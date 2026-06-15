@@ -50,7 +50,8 @@ int nurl_cmd_download(const char *url, const CommonArgs *common) {
     // Check if file already exists for resuming
     unsigned long start_pos = 0;
     bool file_exists = false;
-    if (common->resume) {
+    bool is_stdout = (strcmp(filename, "-") == 0);
+    if (common->resume && !is_stdout) {
         struct stat st;
         if (stat(filename, &st) == 0 && S_ISREG(st.st_mode)) {
             start_pos = (unsigned long)st.st_size;
@@ -261,7 +262,12 @@ int nurl_cmd_download(const char *url, const CommonArgs *common) {
     }
 
     // Open output file
-    FILE *out = fopen(filename, is_resume ? "ab" : "wb");
+    FILE *out = NULL;
+    if (is_stdout) {
+        out = stdout;
+    } else {
+        out = fopen(filename, is_resume ? "ab" : "wb");
+    }
     if (!out) {
         fprintf(stderr, "nurl: (6) Could not open file for writing: %s\n", filename);
         nurl_tls_free(tls);
@@ -290,7 +296,9 @@ int nurl_cmd_download(const char *url, const CommonArgs *common) {
     while ((n = nurl_tls_read(tls, chunk, sizeof(chunk))) > 0) {
         if (fwrite(chunk, 1, n, out) != (size_t)n) {
             fprintf(stderr, "\nnurl: (6) Disk write failed.\n");
-            fclose(out);
+            if (!is_stdout) {
+                fclose(out);
+            }
             nurl_tls_free(tls);
             nurl_net_close(sock_fd);
             free(filename); free(scheme); free(host); free(path);
@@ -331,7 +339,11 @@ int nurl_cmd_download(const char *url, const CommonArgs *common) {
         }
     }
 
-    fclose(out);
+    if (!is_stdout) {
+        fclose(out);
+    } else {
+        fflush(out);
+    }
     nurl_tls_free(tls);
     nurl_net_close(sock_fd);
 

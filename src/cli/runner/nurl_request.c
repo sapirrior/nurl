@@ -174,7 +174,7 @@ int nurl_request_generic(const char *method, const char *url, const CommonArgs *
     bool is_error_status = (res->status_code >= 400);
     bool should_suppress_output = (common->fail && is_error_status);
 
-    if (!common->silent && !should_suppress_output) {
+    if (!should_suppress_output) {
         if (common->include && !common->verbose) {
             printf("HTTP/1.1 %d %s\n", res->status_code, res->status_text);
             for (size_t i = 0; i < res->header_count; i++) {
@@ -184,7 +184,13 @@ int nurl_request_generic(const char *method, const char *url, const CommonArgs *
         }
 
         if (common->output) {
-            FILE *f = fopen(common->output, "wb");
+            bool is_stdout = (strcmp(common->output, "-") == 0);
+            FILE *f = NULL;
+            if (is_stdout) {
+                f = stdout;
+            } else {
+                f = fopen(common->output, "wb");
+            }
             if (!f) {
                 fprintf(stderr, "nurl: (6) Could not open file for writing: %s\n", common->output);
                 nurl_http_response_free(res);
@@ -194,17 +200,21 @@ int nurl_request_generic(const char *method, const char *url, const CommonArgs *
             if (res->body_len > 0) {
                 fwrite(res->body, 1, res->body_len, f);
             }
-            fclose(f);
+            if (!is_stdout) {
+                fclose(f);
+            } else {
+                fflush(f);
+            }
         } else {
             if (res->body_len > 0) {
-                printf("%s\n", res->body);
+                fwrite(res->body, 1, res->body_len, stdout);
             }
         }
     }
 
     double elapsed_sec = nurl_utils_get_time_sec() - start_time;
 
-    if (common->write_out && !common->silent && !should_suppress_output) {
+    if (common->write_out && !should_suppress_output) {
         handle_write_out(common->write_out, res, method, effective_url ? effective_url : url, elapsed_sec);
     }
 

@@ -88,7 +88,27 @@ nurl upload https://api.example.com/media ./image.jpg --field user_id="101" --na
 
 ---
 
-### 3.3. Debugging & Inspection
+### 3.3. First-Class Stdin & Stdout Piping (Like curl)
+
+`nurl` supports stdin/stdout streams out of the box, making it fully compatible with Unix pipes:
+
+#### Piping Response to Another Command (Stdout Redirection)
+Stream files directly to `stdout` using `-o -` or silence connection/progress logs using `-s` while outputting the body payload:
+```bash
+nurl get https://claude.ai/install.sh -L -s | bash
+nurl download https://httpbin.org/image/png -o - > output.png
+```
+
+#### Uploading/Sending Streams (Stdin Redirection)
+Automatically read payloads from `stdin` during write requests (`POST`, `PUT`, `PATCH`), or when `-d -` is explicitly passed. This supports both text and binary data safely:
+```bash
+echo "hello world" | nurl post https://httpbin.org/post -j
+cat image.png | nurl post https://api.example.com/upload -d -
+```
+
+---
+
+### 3.4. Debugging & Inspection
 
 #### Latency Analysis (Ping)
 Check host response times over TLS/TCP:

@@ -184,3 +184,35 @@ bool nurl_utils_has_header(char **headers, size_t count, const char *key) {
     }
     return false;
 }
+
+char *nurl_utils_read_stdin(size_t *out_len) {
+    size_t capacity = 4096;
+    size_t length = 0;
+    char *buffer = malloc(capacity);
+    if (!buffer) return NULL;
+
+    while (1) {
+        size_t bytes_to_read = capacity - length - 1;
+        if (bytes_to_read == 0) {
+            capacity *= 2;
+            char *temp = realloc(buffer, capacity);
+            if (!temp) {
+                free(buffer);
+                return NULL;
+            }
+            buffer = temp;
+            bytes_to_read = capacity - length - 1;
+        }
+
+        size_t read_bytes = fread(buffer + length, 1, bytes_to_read, stdin);
+        if (read_bytes == 0) {
+            break; // EOF or error
+        }
+        length += read_bytes;
+    }
+    buffer[length] = '\0';
+    if (out_len) {
+        *out_len = length;
+    }
+    return buffer;
+}

@@ -71,7 +71,10 @@ int nurl_cmd_inspect(const char *url, const CommonArgs *common) {
     }
 
     // 4. Content-Length Header
-    size_t body_len = common->data ? strlen(common->data) : 0;
+    size_t body_len = 0;
+    if (common->data) {
+        body_len = common->data_len > 0 ? common->data_len : strlen(common->data);
+    }
     if (body_len > 0 && !has_header(common->header, common->header_count, "Content-Length")) {
         printf("> Content-Length: %zu\n", body_len);
     }
@@ -80,7 +83,8 @@ int nurl_cmd_inspect(const char *url, const CommonArgs *common) {
 
     // Print Body
     if (common->data && body_len > 0) {
-        printf("%s\n", common->data);
+        fwrite(common->data, 1, body_len, stdout);
+        printf("\n");
     }
 
     free(scheme);
