@@ -10,6 +10,7 @@
 #endif
 
 #include <sys/time.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 static void update_progress_bar(bool show_progress, bool silent, unsigned long downloaded, unsigned long total_len, unsigned long resume_offset, struct timeval start_time, struct timeval *last_update) {
@@ -72,13 +73,30 @@ nurl_http_response_t *nurl_http_request(
     const char *extra_headers,
     const unsigned char *body,
     size_t body_len,
+    NurlBodyPart *body_parts,
+    size_t body_parts_count,
     FILE *body_out,
     bool show_progress,
     bool silent,
     unsigned long resume_offset
 ) {
+    size_t total_body_len = body_len;
+    if (body_parts && body_parts_count > 0) {
+        total_body_len = 0;
+        for (size_t i = 0; i < body_parts_count; i++) {
+            if (body_parts[i].type == NURL_BODY_PART_MEM) {
+                total_body_len += body_parts[i].len;
+            } else if (body_parts[i].type == NURL_BODY_PART_FILE) {
+                struct stat st;
+                if (stat(body_parts[i].filepath, &st) == 0) {
+                    total_body_len += st.st_size;
+                }
+            }
+        }
+    }
+
     // 1. Construct HTTP request headers
-    size_t req_capacity = 4096 + body_len;
+    size_t req_capacity = 4096 + (extra_headers ? strlen(extra_headers) : 0);
     char *req_buf = malloc(req_capacity);
     if (!req_buf) {
         return NULL;
@@ -115,9 +133,9 @@ nurl_http_response_t *nurl_http_request(
             method, path, hostname);
     }
 
-    if (body && body_len > 0) {
+    if (total_body_len > 0) {
         written += snprintf(req_buf + written, req_capacity - written,
-            "Content-Length: %zu\r\n", body_len);
+            "Content-Length: %zu\r\n", total_body_len);
     }
 
     if (extra_headers) {
@@ -134,8 +152,35 @@ nurl_http_response_t *nurl_http_request(
     }
     free(req_buf);
 
-    // Send HTTP Body if present
-    if (body && body_len > 0) {
+    // Send HTTP Body Parts if present
+    if (body_parts && body_parts_count > 0) {
+        for (size_t i = 0; i < body_parts_count; i++) {
+            NurlBodyPart *part = &body_parts[i];
+            if (part->type == NURL_BODY_PART_MEM) {
+                if (part->data && part->len > 0) {
+                    if (nurl_tls_write(tls, part->data, part->len) <= 0) {
+                        return NULL;
+                    }
+                }
+            } else if (part->type == NURL_BODY_PART_FILE) {
+                if (part->filepath) {
+                    FILE *bf = fopen(part->filepath, "rb");
+                    if (!bf) {
+                        return NULL;
+                    }
+                    char send_buf[65536];
+                    size_t r;
+                    while ((r = fread(send_buf, 1, sizeof(send_buf), bf)) > 0) {
+                        if (nurl_tls_write(tls, (const unsigned char *)send_buf, r) <= 0) {
+                            fclose(bf);
+                            return NULL;
+                        }
+                    }
+                    fclose(bf);
+                }
+            }
+        }
+    } else if (body && body_len > 0) {
         if (nurl_tls_write(tls, body, body_len) <= 0) {
             return NULL;
         }

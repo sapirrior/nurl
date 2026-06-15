@@ -3,14 +3,15 @@
 #include "nurl_tls.h"
 #include "nurl_utils.h"
 #include "nurl_http.h"
+#include "nurl_engine.h"
+#include "request.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <ctype.h>
-
-
 
 int nurl_cmd_upload(const char *url, const CommonArgs *common) {
     if (!common->upload_file) {
@@ -18,32 +19,12 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
         return NURL_ERR_GENERIC;
     }
 
-    FILE *f = fopen(common->upload_file, "rb");
-    if (!f) {
+    struct stat st;
+    if (stat(common->upload_file, &st) != 0 || !S_ISREG(st.st_mode)) {
         fprintf(stderr, "nurl: (6) Could not read upload file '%s'\n", common->upload_file);
         return NURL_ERR_WRITE;
     }
-
-    fseek(f, 0, SEEK_END);
-    long fsize = ftell(f);
-    fseek(f, 0, SEEK_SET);
-
-    unsigned char *file_bytes = malloc(fsize > 0 ? fsize : 1);
-    if (!file_bytes) {
-        fclose(f);
-        return NURL_ERR_GENERIC;
-    }
-
-    if (fsize > 0) {
-        size_t read_bytes = fread(file_bytes, 1, fsize, f);
-        if (read_bytes != (size_t)fsize) {
-            fprintf(stderr, "nurl: (6) Failed to read file bytes.\n");
-            free(file_bytes);
-            fclose(f);
-            return NURL_ERR_WRITE;
-        }
-    }
-    fclose(f);
+    long fsize = st.st_size;
 
     const char *file_name = strrchr(common->upload_file, '/');
     if (file_name) {
@@ -81,17 +62,16 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
 
     const char *boundary = "------------------------nurlboundary1234567890";
 
-    // Allocate multipart body buffer
-    size_t body_cap = 4096 + fsize;
+    // Build multipart preamble in a dynamic memory buffer
+    size_t preamble_cap = 4096;
     for (size_t i = 0; i < common->upload_fields_count; i++) {
-        body_cap += strlen(common->upload_fields[i]) + 256;
+        preamble_cap += strlen(common->upload_fields[i]) + 256;
     }
-    unsigned char *body = malloc(body_cap);
-    if (!body) {
-        free(file_bytes);
-        return NURL_ERR_GENERIC;
+    char *preamble = malloc(preamble_cap);
+    if (!preamble) {
+        return NURL_ERR_OOM;
     }
-    size_t body_len = 0;
+    size_t preamble_len = 0;
 
     // 1. Add form fields
     for (size_t i = 0; i < common->upload_fields_count; i++) {
@@ -103,190 +83,115 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
             char *k = nurl_utils_trim(field_copy);
             char *v = nurl_utils_trim(eq + 1);
 
-            body_len += snprintf((char *)body + body_len, body_cap - body_len, "--%s\r\n", boundary);
-            body_len += snprintf((char *)body + body_len, body_cap - body_len, "Content-Disposition: form-data; name=\"%s\"\r\n\r\n", k);
-            body_len += snprintf((char *)body + body_len, body_cap - body_len, "%s\r\n", v);
+            preamble_len += snprintf(preamble + preamble_len, preamble_cap - preamble_len, "--%s\r\n", boundary);
+            preamble_len += snprintf(preamble + preamble_len, preamble_cap - preamble_len, "Content-Disposition: form-data; name=\"%s\"\r\n\r\n", k);
+            preamble_len += snprintf(preamble + preamble_len, preamble_cap - preamble_len, "%s\r\n", v);
         }
         free(field_copy);
     }
 
-    // 2. Add file part
-    body_len += snprintf((char *)body + body_len, body_cap - body_len, "--%s\r\n", boundary);
-    body_len += snprintf((char *)body + body_len, body_cap - body_len,
+    // 2. Add file part header
+    preamble_len += snprintf(preamble + preamble_len, preamble_cap - preamble_len, "--%s\r\n", boundary);
+    preamble_len += snprintf(preamble + preamble_len, preamble_cap - preamble_len,
         "Content-Disposition: form-data; name=\"%s\"; filename=\"%s\"\r\n",
         common->upload_name ? common->upload_name : "file", file_name);
-    body_len += snprintf((char *)body + body_len, body_cap - body_len, "Content-Type: %s\r\n\r\n", mime_type);
+    preamble_len += snprintf(preamble + preamble_len, preamble_cap - preamble_len, "Content-Type: %s\r\n\r\n", mime_type);
 
-    if (fsize > 0) {
-        memcpy(body + body_len, file_bytes, fsize);
-        body_len += fsize;
+    // Build multipart epilogue
+    // Wait, the boundary is close boundary: "--boundary--\r\n"
+    char epilogue_buf[128];
+    snprintf(epilogue_buf, sizeof(epilogue_buf), "\r\n--%s--\r\n", boundary);
+
+    // Set up body parts
+    NurlBodyPart parts[3];
+    parts[0].type = NURL_BODY_PART_MEM;
+    parts[0].data = (const uint8_t *)preamble;
+    parts[0].len = preamble_len;
+    parts[0].filepath = NULL;
+
+    parts[1].type = NURL_BODY_PART_FILE;
+    parts[1].data = NULL;
+    parts[1].len = fsize;
+    parts[1].filepath = common->upload_file;
+
+    parts[2].type = NURL_BODY_PART_MEM;
+    parts[2].data = (const uint8_t *)epilogue_buf;
+    parts[2].len = strlen(epilogue_buf);
+    parts[2].filepath = NULL;
+
+    // Create and execute NurlRequest
+    NurlRequest *req = nurl_request_new();
+    if (!req) {
+        free(preamble);
+        return NURL_ERR_OOM;
     }
-    memcpy(body + body_len, "\r\n", 2);
-    body_len += 2;
 
-    // 3. Close boundary
-    body_len += snprintf((char *)body + body_len, body_cap - body_len, "--%s--\r\n", boundary);
+    nurl_request_from_args(req, "POST", url, common);
+    
+    // Add Content-Type multipart header
+    char ct_val[256];
+    snprintf(ct_val, sizeof(ct_val), "multipart/form-data; boundary=%s", boundary);
+    nurl_headers_add(req->headers, "Content-Type", ct_val);
 
-    free(file_bytes);
-
-    // Prepare extra headers
-    size_t extra_hdr_cap = 1024;
-    char *extra_hdr = malloc(extra_hdr_cap);
-    if (!extra_hdr) {
-        free(body);
-        return NURL_ERR_GENERIC;
+    req->body_parts = malloc(sizeof(NurlBodyPart) * 3);
+    if (!req->body_parts) {
+        free(preamble);
+        nurl_request_free(req);
+        return NURL_ERR_OOM;
     }
-    extra_hdr[0] = '\0';
-    size_t extra_hdr_len = 0;
-    bool oom = false;
+    memcpy(req->body_parts, parts, sizeof(NurlBodyPart) * 3);
+    req->body_parts_count = 3;
 
-    for (size_t i = 0; i < common->header_count; i++) {
-        if (!nurl_utils_append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_cap, "%s\r\n", common->header[i])) {
-            oom = true; break;
+    unsigned int max_retries = common->retry;
+    unsigned long delay_sec = common->retry_delay > 0 ? common->retry_delay : 1;
+    int engine_err = NURL_OK;
+    nurl_http_response_t *res = NULL;
+    char *effective_url = NULL;
+
+    for (unsigned int attempt = 0; attempt <= max_retries; attempt++) {
+        if (res) {
+            nurl_http_response_free(res);
+            res = NULL;
         }
-    }
-
-    if (!oom) {
-        char ct_hdr[256];
-        snprintf(ct_hdr, sizeof(ct_hdr), "Content-Type: multipart/form-data; boundary=%s\r\n", boundary);
-        if (!nurl_utils_append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_cap, "%s", ct_hdr)) {
-            oom = true;
+        if (effective_url) {
+            free(effective_url);
+            effective_url = NULL;
         }
-    }
 
-    if (!oom && !common->no_auth) {
-        if (common->bearer || common->token) {
-            const char *tok = common->bearer ? common->bearer : common->token;
-            if (!nurl_utils_has_header(common->header, common->header_count, "Authorization")) {
-                if (!nurl_utils_append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_cap, "Authorization: Bearer %s\r\n", tok)) {
-                    oom = true;
+        engine_err = nurl_engine_execute_request(req, &res, &effective_url);
+
+        if (engine_err == NURL_OK && res) {
+            if (res->status_code < 500) {
+                break;
+            } else {
+                if (attempt < max_retries && !common->silent) {
+                    fprintf(stderr, "nurl: Warning: HTTP %d. Retrying in %lu seconds...\n", res->status_code, delay_sec);
                 }
             }
-        } else if (common->user) {
-            if (!nurl_utils_has_header(common->header, common->header_count, "Authorization")) {
-                char *b64 = nurl_utils_base64_encode((const unsigned char *)common->user, strlen(common->user));
-                if (b64) {
-                    if (!nurl_utils_append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_cap, "Authorization: Basic %s\r\n", b64)) {
-                        oom = true;
-                    }
-                    free(b64);
-                } else {
-                    oom = true;
-                }
+        } else {
+            if (attempt < max_retries && !common->silent) {
+                fprintf(stderr, "nurl: Warning: Request failed (error %d). Retrying in %lu seconds...\n", engine_err, delay_sec);
             }
+        }
+
+        if (attempt < max_retries) {
+            sleep(delay_sec);
         }
     }
 
-    if (!oom && common->user_agent) {
-        if (!nurl_utils_has_header(common->header, common->header_count, "User-Agent")) {
-            if (!nurl_utils_append_hdr_str(&extra_hdr, &extra_hdr_len, &extra_hdr_cap, "User-Agent: %s\r\n", common->user_agent)) {
-                oom = true;
-            }
-        }
+    free(preamble);
+
+    if (engine_err != NURL_OK) {
+        if (effective_url) free(effective_url);
+        nurl_request_free(req);
+        return engine_err;
     }
-
-    if (oom) {
-        fprintf(stderr, "nurl: (1) Out of memory preparing headers.\n");
-        free(body);
-        free(extra_hdr);
-        return NURL_ERR_GENERIC;
-    }
-
-    char *scheme = NULL;
-    char *host = NULL;
-    char *path = NULL;
-    int port = 0;
-
-    if (nurl_utils_parse_url(url, &scheme, &host, &port, &path) != 0) {
-        fprintf(stderr, "nurl: (4) Malformed URL: %s\n", url);
-        free(body);
-        free(extra_hdr);
-        return NURL_ERR_INVALID_URL;
-    }
-
-    int sock_fd = nurl_net_connect_proxy(host, port, common->proxy, common->proxy_user, common->no_proxy);
-    if (sock_fd < 0) {
-        fprintf(stderr, "nurl: (2) Could not connect to host %s:%d\n", host, port);
-        free(body);
-        free(extra_hdr);
-        free(scheme); free(host); free(path);
-        return NURL_ERR_NETWORK;
-    }
-
-    if (common->timeout > 0) {
-        nurl_net_set_timeout(sock_fd, common->timeout);
-    }
-
-    nurl_tls_t *tls = nurl_tls_create(!common->no_verify, common->cacert, common->cert, common->key, common->tls12, common->tls13);
-    if (!tls) {
-        fprintf(stderr, "nurl: (5) Failed to initialize TLS context.\n");
-        nurl_net_close(sock_fd);
-        free(body);
-        free(extra_hdr);
-        free(scheme); free(host); free(path);
-        return NURL_ERR_TLS;
-    }
-
-    if (common->verbose && !common->silent) {
-        fprintf(stderr, "* Connected to %s port %d\n", host, port);
-        fprintf(stderr, "* TLS handshake complete\n*\n");
-        fprintf(stderr, "> POST %s HTTP/1.1\n", path);
-        fprintf(stderr, "> Host: %s\n", host);
-        fprintf(stderr, "> User-Agent: nurl/" NURL_VERSION "\n");
-        fprintf(stderr, "> Connection: close\n");
-
-        char *hdr_copy = strdup(extra_hdr);
-        char *line = strtok(hdr_copy, "\r\n");
-        while (line) {
-            char *colon = strchr(line, ':');
-            if (colon) {
-                *colon = '\0';
-                char *key = line;
-                char *val = colon + 1;
-                while (*val && isspace((unsigned char)*val)) val++;
-                const char *redacted = nurl_utils_redact_header(key, val);
-                fprintf(stderr, "> %s: %s\n", key, redacted);
-            }
-            line = strtok(NULL, "\r\n");
-        }
-        free(hdr_copy);
-        fprintf(stderr, "> \n");
-    }
-
-    if (nurl_tls_handshake(tls, sock_fd, host) != 0) {
-        fprintf(stderr, "nurl: (5) TLS verification failed.\n");
-        nurl_tls_free(tls);
-        nurl_net_close(sock_fd);
-        free(body);
-        free(extra_hdr);
-        free(scheme); free(host); free(path);
-        return NURL_ERR_TLS;
-    }
-
-    nurl_http_response_t *res = nurl_http_request(tls, "POST", path, host, extra_hdr, body, body_len, NULL, false, true, 0);
-
-    free(body);
-    free(extra_hdr);
 
     if (!res) {
-        fprintf(stderr, "nurl: (2) HTTP request failed or timed out.\n");
-        nurl_tls_free(tls);
-        nurl_net_close(sock_fd);
-        free(scheme); free(host); free(path);
-        return NURL_ERR_NETWORK;
+        if (effective_url) free(effective_url);
+        nurl_request_free(req);
+        return NURL_ERR_GENERIC;
     }
-
-    if (common->verbose && !common->silent) {
-        fprintf(stderr, "< HTTP/1.1 %d %s\n", res->status_code, res->status_text);
-        for (size_t i = 0; i < res->header_count; i++) {
-            fprintf(stderr, "< %s\n", res->headers[i]);
-        }
-        fprintf(stderr, "< \n");
-    }
-
-    nurl_tls_free(tls);
-    nurl_net_close(sock_fd);
-    free(scheme); free(host); free(path);
 
     bool should_suppress_output = (common->fail && res->status_code >= 400);
     if (!should_suppress_output) {
@@ -309,6 +214,8 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
             if (!out_f) {
                 fprintf(stderr, "nurl: (6) Could not open file for writing: %s\n", common->output);
                 nurl_http_response_free(res);
+                free(effective_url);
+                nurl_request_free(req);
                 return NURL_ERR_WRITE;
             }
             if (res->body_len > 0) {
@@ -334,5 +241,9 @@ int nurl_cmd_upload(const char *url, const CommonArgs *common) {
     }
 
     nurl_http_response_free(res);
+    if (effective_url) {
+        free(effective_url);
+    }
+    nurl_request_free(req);
     return ret_code;
 }

@@ -7,6 +7,18 @@
 #include <stddef.h>
 #include <stdio.h>
 
+typedef enum {
+    NURL_BODY_PART_MEM,
+    NURL_BODY_PART_FILE
+} NurlBodyPartType;
+
+typedef struct {
+    NurlBodyPartType type;
+    const uint8_t *data;
+    size_t len;
+    const char *filepath;
+} NurlBodyPart;
+
 typedef struct {
     const char      *method;       /* "GET", "POST", etc. */
     const char      *url;
@@ -14,6 +26,9 @@ typedef struct {
     const uint8_t   *body;
     size_t           body_len;
     bool             body_is_stream; /* read from stdin lazily */
+
+    NurlBodyPart    *body_parts;
+    size_t           body_parts_count;
 
     /* Transfer config */
     unsigned int     timeout_sec;

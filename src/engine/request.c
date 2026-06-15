@@ -74,5 +74,8 @@ void nurl_request_free(NurlRequest *req) {
     if (req->headers) {
         nurl_headers_free(req->headers);
     }
+    if (req->body_parts) {
+        free(req->body_parts);
+    }
     free(req);
 }

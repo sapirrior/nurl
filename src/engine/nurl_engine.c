@@ -192,7 +192,7 @@ int nurl_engine_execute_request(
             fprintf(stderr, "> \n");
         }
 
-        res = nurl_http_request(tls, req->method, path, host, extra_hdr, req->body, req->body_len, req->out, req->progress, req->silent, req->resume_offset);
+        res = nurl_http_request(tls, req->method, path, host, extra_hdr, req->body, req->body_len, req->body_parts, req->body_parts_count, req->out, req->progress, req->silent, req->resume_offset);
         free(extra_hdr);
 
         if (!res) {
