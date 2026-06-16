@@ -14,16 +14,6 @@ static void strip_quotes(char *str) {
     }
 }
 
-static bool has_header_key(char **headers, size_t count, const char *key) {
-    size_t key_len = strlen(key);
-    for (size_t i = 0; i < count; i++) {
-        if (strncasecmp(headers[i], key, key_len) == 0 && headers[i][key_len] == ':') {
-            return true;
-        }
-    }
-    return false;
-}
-
 void nurl_config_load_and_merge(CommonArgs *args) {
     char *config_path = getenv("NURL_CONFIG");
     char *allocated_path = NULL;
@@ -84,7 +74,7 @@ void nurl_config_load_and_merge(CommonArgs *args) {
                 }
             } else if (section == 2) {
                 // [headers]
-                if (!has_header_key(args->header, args->header_count, key)) {
+                if (!nurl_utils_has_header(args->header, args->header_count, key)) {
                     char *hdr_line = NULL;
                     if (asprintf(&hdr_line, "%s: %s", key, val) >= 0) {
                         char **temp = realloc(args->header, sizeof(char *) * (args->header_count + 1));

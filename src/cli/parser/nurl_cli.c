@@ -104,8 +104,7 @@ static void nurl_cli_infer_method(const CommonArgs *args, char **command) {
     }
 
     bool has_body = (args->data && strlen(args->data) > 0)
-                  || args->json
-                  || (args->form && args->form_count > 0);
+                  || args->json;
 
     bool has_upload = (args->upload_file && strlen(args->upload_file) > 0);
 

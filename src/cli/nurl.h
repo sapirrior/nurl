@@ -13,19 +13,12 @@ typedef struct {
     char *user;
     char *bearer;
     char *token;
-    bool digest;
-    bool netrc;
-    char *netrc_file;
     bool no_auth;
 
     // Body
     char *data;
     size_t data_len;
     bool json;
-    char *data_binary;
-    char *data_urlencode;
-    char **form;
-    size_t form_count;
 
     // TLS
     bool no_verify;
@@ -41,8 +34,6 @@ typedef struct {
     char *session;
 
     // Request Control
-    char **query;
-    size_t query_count;
     char *method;
     unsigned long timeout;
     unsigned long connect_timeout;
@@ -56,30 +47,17 @@ typedef struct {
     char *proxy;
     char *proxy_user;
     char *no_proxy;
-    char *interface;
-    char *limit_rate;
-    char *max_filesize;
-    bool keepalive;
     unsigned int retry;
     unsigned long retry_delay;
-    char *retry_on;
 
     // Output
     char *output;
-    bool output_name;
     bool include;
     bool verbose;
     bool silent;
-    bool show_error;
     char *write_out;
     bool fail;
-    bool fail_with_body;
     bool raw;
-    bool head_only;
-    bool body_only;
-    char *dump_header;
-    char *trace;
-    char *format;
 
     // Ping specific
     unsigned int ping_count;

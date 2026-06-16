@@ -7,16 +7,6 @@
 #include <strings.h>
 #include <ctype.h>
 
-static bool has_header(char **headers, size_t count, const char *key) {
-    size_t key_len = strlen(key);
-    for (size_t i = 0; i < count; i++) {
-        if (strncasecmp(headers[i], key, key_len) == 0 && headers[i][key_len] == ':') {
-            return true;
-        }
-    }
-    return false;
-}
-
 int nurl_cmd_inspect(const char *url, const CommonArgs *common) {
     char *scheme = NULL;
     char *host = NULL;
@@ -57,18 +47,18 @@ int nurl_cmd_inspect(const char *url, const CommonArgs *common) {
     // 2. Auth Header
     if (!common->no_auth) {
         if (common->bearer || common->token) {
-            if (!has_header(common->header, common->header_count, "Authorization")) {
+            if (!nurl_utils_has_header(common->header, common->header_count, "Authorization")) {
                 printf("> Authorization: [hidden]\n");
             }
         } else if (common->user) {
-            if (!has_header(common->header, common->header_count, "Authorization")) {
+            if (!nurl_utils_has_header(common->header, common->header_count, "Authorization")) {
                 printf("> Authorization: [hidden]\n");
             }
         }
     }
 
     // 3. JSON Header
-    if (common->json && !has_header(common->header, common->header_count, "Content-Type")) {
+    if (common->json && !nurl_utils_has_header(common->header, common->header_count, "Content-Type")) {
         printf("> Content-Type: application/json\n");
     }
 
@@ -77,7 +67,7 @@ int nurl_cmd_inspect(const char *url, const CommonArgs *common) {
     if (common->data) {
         body_len = common->data_len > 0 ? common->data_len : strlen(common->data);
     }
-    if (body_len > 0 && !has_header(common->header, common->header_count, "Content-Length")) {
+    if (body_len > 0 && !nurl_utils_has_header(common->header, common->header_count, "Content-Length")) {
         printf("> Content-Length: %zu\n", body_len);
     }
 
