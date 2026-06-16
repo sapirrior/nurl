@@ -24,9 +24,7 @@ static bool is_subcommand(const char *arg) {
     };
     size_t count = sizeof(commands) / sizeof(commands[0]);
     for (size_t i = 0; i < count; i++) {
-        if (strcmp(arg, commands[i]) == 0) {
-            return true;
-        }
+        if (strcmp(arg, commands[i]) == 0) return true;
     }
     return false;
 }
@@ -40,15 +38,12 @@ static bool looks_like_url(const char *arg) {
 }
 
 static int edit_distance(const char *s1, const char *s2) {
-    int len1 = strlen(s1);
-    int len2 = strlen(s2);
+    int len1 = strlen(s1), len2 = strlen(s2);
     int matrix[32][32];
     if (len1 > 31) len1 = 31;
     if (len2 > 31) len2 = 31;
-
     for (int i = 0; i <= len1; i++) matrix[i][0] = i;
     for (int j = 0; j <= len2; j++) matrix[0][j] = j;
-
     for (int i = 1; i <= len1; i++) {
         for (int j = 1; j <= len2; j++) {
             int cost = (s1[i - 1] == s2[j - 1]) ? 0 : 1;
@@ -67,30 +62,20 @@ static const char *suggest_command(const char *arg) {
         "get", "post", "put", "delete", "head", "patch", "options",
         "download", "upload", "inspect", "ping", "resolve"
     };
-    size_t count = sizeof(commands) / sizeof(commands[0]);
     const char *best_match = NULL;
     int min_dist = 999;
-
-    for (size_t i = 0; i < count; i++) {
+    for (size_t i = 0; i < 12; i++) {
         int dist = edit_distance(arg, commands[i]);
-        if (dist < min_dist) {
-            min_dist = dist;
-            best_match = commands[i];
-        }
+        if (dist < min_dist) { min_dist = dist; best_match = commands[i]; }
     }
-    if (min_dist <= 3) {
-        return best_match;
-    }
-    return NULL;
+    return (min_dist <= 3) ? best_match : NULL;
 }
 
 static char *nurl_normalize_url(const char *raw) {
     if (!raw) return NULL;
-    /* Already has a scheme — pass through */
     if (strstr(raw, "://")) return strdup(raw);
-    /* Prepend https:// for bare hostnames and host/path strings */
     size_t len = strlen(raw);
-    char *normalized = malloc(len + 9); /* "https://" + NUL */
+    char *normalized = malloc(len + 9);
     if (!normalized) return NULL;
     snprintf(normalized, len + 9, "https://%s", raw);
     return normalized;
@@ -102,495 +87,148 @@ static void nurl_cli_infer_method(const CommonArgs *args, char **command) {
         *command = strdup(args->method);
         return;
     }
-
-    bool has_body = (args->data && strlen(args->data) > 0)
-                  || args->json;
-
-    bool has_upload = (args->upload_file && strlen(args->upload_file) > 0);
-
-    if (has_upload) {
-        free(*command);
-        *command = strdup("upload");
-        return;
+    if (args->upload_file && strlen(args->upload_file) > 0) {
+        free(*command); *command = strdup("upload");
+    } else if ((args->data && strlen(args->data) > 0) || args->json) {
+        free(*command); *command = strdup("post");
     }
+}
 
-    if (has_body) {
-        free(*command);
-        *command = strdup("post");
-        return;
+static int set_arg_str(char **dest, const char *val, const char *name) {
+    if (*dest) free(*dest);
+    if (!(*dest = strdup(val))) {
+        nurl_diag_err("out of memory while processing --%s.", name);
+        return -1;
     }
+    return 0;
+}
+
+static int append_arg_str(char ***array, size_t *count, const char *val, const char *name) {
+    char **temp = realloc(*array, sizeof(char *) * (*count + 1));
+    if (!temp || !(temp[*count] = strdup(val))) {
+        nurl_diag_err("out of memory while processing --%s.", name);
+        if (temp) *array = temp;
+        return -1;
+    }
+    *array = temp;
+    (*count)++;
+    return 0;
 }
 
 int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char **url) {
     nurl_cli_init_args(args);
-
     static struct option long_options[] = {
-        {"user",            required_argument, NULL, 'u'},
-        {"bearer",          required_argument, NULL, 1},
-        {"token",           required_argument, NULL, 2},
-        {"no-auth",         no_argument,       NULL, 3},
-        {"data",            required_argument, NULL, 'd'},
-        {"json",            no_argument,       NULL, 'j'},
-        {"no-verify",       no_argument,       NULL, 'k'},
-        {"cacert",          required_argument, NULL, 4},
-        {"timeout",         required_argument, NULL, 't'},
-        {"location",        no_argument,       NULL, 'L'},
-        {"header",          required_argument, NULL, 'H'},
-        {"output",          required_argument, NULL, 'o'},
-        {"include",         no_argument,       NULL, 'i'},
-        {"verbose",         no_argument,       NULL, 'v'},
-        {"silent",          no_argument,       NULL, 's'},
-        {"raw",             no_argument,       NULL, 5},
-        {"count",           required_argument, NULL, 6},
-        {"interval",        required_argument, NULL, 7},
-        {"resume",          no_argument,       NULL, 8},
-        {"progress",        no_argument,       NULL, 9},
-        {"mime",            required_argument, NULL, 10},
-        {"name",            required_argument, NULL, 11},
-        {"field",           required_argument, NULL, 12},
-        {"cookie",          required_argument, NULL, 'b'},
-        {"cookie-jar",      required_argument, NULL, 'c'},
-        {"session",         required_argument, NULL, 13},
-        {"write-out",       required_argument, NULL, 'w'},
-        {"version",         no_argument,       NULL, 'V'},
-        {"help",            no_argument,       NULL, 'h'},
-        {"cert",            required_argument, NULL, 14},
-        {"key",             required_argument, NULL, 15},
-        {"proxy",           required_argument, NULL, 'x'},
-        {"proxy-user",      required_argument, NULL, 16},
-        {"no-proxy",        required_argument, NULL, 17},
-        {"user-agent",      required_argument, NULL, 'A'},
-        {"compressed",      no_argument,       NULL, 18},
-        {"retry",           required_argument, NULL, 19},
-        {"retry-delay",     required_argument, NULL, 20},
-        {"referer",         required_argument, NULL, 'e'},
-        {"fail",            no_argument,       NULL, 'f'},
-        {"tls1.2",          no_argument,       NULL, 21},
-        {"tls1.3",          no_argument,       NULL, 22},
-        {"request",         required_argument, NULL, 'X'},
-        {"upload",          required_argument, NULL, 23},
-        {NULL, 0, NULL, 0}
+        {"user", 1, 0, 'u'}, {"bearer", 1, 0, 1}, {"token", 1, 0, 2}, {"no-auth", 0, 0, 3},
+        {"data", 1, 0, 'd'}, {"json", 0, 0, 'j'}, {"no-verify", 0, 0, 'k'}, {"cacert", 1, 0, 4},
+        {"timeout", 1, 0, 't'}, {"location", 0, 0, 'L'}, {"header", 1, 0, 'H'}, {"output", 1, 0, 'o'},
+        {"include", 0, 0, 'i'}, {"verbose", 0, 0, 'v'}, {"silent", 0, 0, 's'}, {"raw", 0, 0, 5},
+        {"count", 1, 0, 6}, {"interval", 1, 0, 7}, {"resume", 0, 0, 8}, {"progress", 0, 0, 9},
+        {"mime", 1, 0, 10}, {"name", 1, 0, 11}, {"field", 1, 0, 12}, {"cookie", 1, 0, 'b'},
+        {"cookie-jar", 1, 0, 'c'}, {"session", 1, 0, 13}, {"write-out", 1, 0, 'w'}, {"version", 0, 0, 'V'},
+        {"help", 0, 0, 'h'}, {"cert", 1, 0, 14}, {"key", 1, 0, 15}, {"proxy", 1, 0, 'x'},
+        {"proxy-user", 1, 0, 16}, {"no-proxy", 1, 0, 17}, {"user-agent", 1, 0, 'A'}, {"compressed", 0, 0, 18},
+        {"retry", 1, 0, 19}, {"retry-delay", 1, 0, 20}, {"referer", 1, 0, 'e'}, {"fail", 0, 0, 'f'},
+        {"tls1.2", 0, 0, 21}, {"tls1.3", 0, 0, 22}, {"request", 1, 0, 'X'}, {"upload", 1, 0, 23}, {0, 0, 0, 0}
     };
 
-    int opt;
-    opterr = 0; // Disable default getopt error printing
-
+    int opt; opterr = 0;
     while ((opt = getopt_long(argc, argv, "u:d:jt:LH:o:ivshkb:c:w:Vx:A:e:fX:", long_options, NULL)) != -1) {
         switch (opt) {
-            case 'u':
-                if (args->user) free(args->user);
-                args->user = strdup(optarg);
-                if (!args->user) {
-                    nurl_diag_err(
- "Out of memory while processing the --user argument.");
-                    return -1;
-                }
-                break;
-            case 1:
-                if (args->bearer) free(args->bearer);
-                args->bearer = strdup(optarg);
-                if (!args->bearer) {
-                    nurl_diag_err(
- "Out of memory while processing the --bearer argument.");
-                    return -1;
-                }
-                break;
-            case 2:
-                if (args->token) free(args->token);
-                args->token = strdup(optarg);
-                if (!args->token) {
-                    nurl_diag_err(
- "Out of memory while processing the --token argument.");
-                    return -1;
-                }
-                break;
-            case 3:
-                args->no_auth = true;
-                break;
-            case 'd':
-                if (args->data) free(args->data);
-                args->data = strdup(optarg);
-                if (!args->data) {
-                    nurl_diag_err(
- "Out of memory while processing the --data argument.");
-                    return -1;
-                }
-                args->data_len = strlen(optarg);
-                break;
-            case 'j':
-                args->json = true;
-                break;
-            case 'k':
-                args->no_verify = true;
-                break;
-            case 4:
-                if (args->cacert) free(args->cacert);
-                args->cacert = strdup(optarg);
-                if (!args->cacert) {
-                    nurl_diag_err(
- "Out of memory while processing the --cacert argument.");
-                    return -1;
-                }
-                break;
-            case 't':
-                for (size_t i = 0; i < strlen(optarg); i++) {
-                    if (!isdigit((unsigned char)optarg[i])) {
-                        nurl_err(NURL_ERR_ARG, "invalid timeout '%s', expected a number in seconds", optarg);
-                        return NURL_ERR_ARG;
-                    }
-                }
-                args->timeout = strtoul(optarg, NULL, 10);
-                break;
-            case 'L':
-                args->location = true;
-                break;
-            case 'H': {
-                if (strchr(optarg, ':') == NULL) {
-                    nurl_err(NURL_ERR_ARG, "header '%s' is missing ':', use 'Key: Value' format", optarg);
-                    return NURL_ERR_ARG;
-                }
-                char **temp = realloc(args->header, sizeof(char *) * (args->header_count + 1));
-                if (!temp) {
-                    nurl_diag_err(
- "Out of memory while processing the --header argument.");
-                    return -1;
-                }
-                args->header = temp;
-                args->header[args->header_count] = strdup(optarg);
-                if (!args->header[args->header_count]) {
-                    nurl_diag_err(
- "Out of memory while processing the --header argument.");
-                    return -1;
-                }
-                args->header_count++;
-                break;
-            }
-            case 'o':
-                if (args->output) free(args->output);
-                args->output = strdup(optarg);
-                if (!args->output) {
-                    nurl_diag_err(
- "Out of memory while processing the --output argument.");
-                    return -1;
-                }
-                break;
-            case 'i':
-                args->include = true;
-                break;
-            case 'v':
-                args->verbose = true;
-                break;
-            case 's':
-                args->silent = true;
-                break;
-            case 5:
-                args->raw = true;
-                break;
-            case 6:
-                args->ping_count = (unsigned int)strtoul(optarg, NULL, 10);
-                break;
-            case 7:
-                args->ping_interval = strtoul(optarg, NULL, 10);
-                break;
-            case 8:
-                args->resume = true;
-                break;
-            case 9:
-                args->progress = true;
-                break;
-            case 10:
-                if (args->upload_mime) free(args->upload_mime);
-                args->upload_mime = strdup(optarg);
-                if (!args->upload_mime) {
-                    fprintf(stderr, "Error: Out of memory.\n");
-                    return -1;
-                }
-                break;
-            case 11:
-                if (args->upload_name) free(args->upload_name);
-                args->upload_name = strdup(optarg);
-                if (!args->upload_name) {
-                    fprintf(stderr, "Error: Out of memory.\n");
-                    return -1;
-                }
-                break;
-            case 12: {
-                char **temp = realloc(args->upload_fields, sizeof(char *) * (args->upload_fields_count + 1));
-                if (!temp) {
-                    fprintf(stderr, "Error: Out of memory.\n");
-                    return -1;
-                }
-                args->upload_fields = temp;
-                args->upload_fields[args->upload_fields_count] = strdup(optarg);
-                if (!args->upload_fields[args->upload_fields_count]) {
-                    fprintf(stderr, "Error: Out of memory.\n");
-                    return -1;
-                }
-                args->upload_fields_count++;
-                break;
-            }
-            case 'b':
-                if (args->cookie) free(args->cookie);
-                args->cookie = strdup(optarg);
-                if (!args->cookie) {
-                    fprintf(stderr, "Error: Out of memory.\n");
-                    return -1;
-                }
-                break;
-            case 'c':
-                if (args->cookie_jar) free(args->cookie_jar);
-                args->cookie_jar = strdup(optarg);
-                if (!args->cookie_jar) {
-                    fprintf(stderr, "Error: Out of memory.\n");
-                    return -1;
-                }
-                break;
-            case 13:
-                if (args->session) free(args->session);
-                args->session = strdup(optarg);
-                if (!args->session) {
-                    fprintf(stderr, "Error: Out of memory.\n");
-                    return -1;
-                }
-                break;
-            case 'w':
-                if (args->write_out) free(args->write_out);
-                args->write_out = strdup(optarg);
-                if (!args->write_out) {
-                    nurl_diag_err(
- "Out of memory while processing the --write-out argument.");
-                    return -1;
-                }
-                break;
-            case 14:
-                if (args->cert) free(args->cert);
-                args->cert = strdup(optarg);
-                if (!args->cert) {
-                    nurl_diag_err(
- "Out of memory while processing the --cert argument.");
-                    return -1;
-                }
-                break;
-            case 15:
-                if (args->key) free(args->key);
-                args->key = strdup(optarg);
-                if (!args->key) {
-                    nurl_diag_err(
- "Out of memory while processing the --key argument.");
-                    return -1;
-                }
-                break;
-            case 'x':
-                if (args->proxy) free(args->proxy);
-                args->proxy = strdup(optarg);
-                if (!args->proxy) {
-                    nurl_diag_err(
- "Out of memory while processing the --proxy argument.");
-                    return -1;
-                }
-                break;
-            case 16:
-                if (args->proxy_user) free(args->proxy_user);
-                args->proxy_user = strdup(optarg);
-                if (!args->proxy_user) {
-                    nurl_diag_err(
- "Out of memory while processing the --proxy-user argument.");
-                    return -1;
-                }
-                break;
-            case 17:
-                if (args->no_proxy) free(args->no_proxy);
-                args->no_proxy = strdup(optarg);
-                if (!args->no_proxy) {
-                    nurl_diag_err(
- "Out of memory while processing the --no-proxy argument.");
-                    return -1;
-                }
-                break;
-            case 'A':
-                if (args->user_agent) free(args->user_agent);
-                args->user_agent = strdup(optarg);
-                if (!args->user_agent) {
-                    nurl_diag_err(
- "Out of memory while processing the --user-agent argument.");
-                    return -1;
-                }
-                break;
-            case 18:
-                args->compressed = true;
-                break;
-            case 19: {
-                for (size_t i = 0; i < strlen(optarg); i++) {
-                    if (!isdigit((unsigned char)optarg[i])) {
-                        nurl_err(NURL_ERR_ARG, "invalid retry count '%s', expected a positive integer", optarg);
-                        return NURL_ERR_ARG;
-                    }
-                }
-                unsigned long r = strtoul(optarg, NULL, 10);
-                if (r > 99) {
-                    nurl_err(NURL_ERR_ARG, "retry count %lu is too large, maximum is 99", r);
-                    return NURL_ERR_ARG;
-                }
-                args->retry = (unsigned int)r;
-                break;
-            }
-            case 20: {
-                for (size_t i = 0; i < strlen(optarg); i++) {
-                    if (!isdigit((unsigned char)optarg[i])) {
-                        nurl_err(NURL_ERR_ARG, "invalid retry delay '%s', expected a positive integer", optarg);
-                        return NURL_ERR_ARG;
-                    }
-                }
-                args->retry_delay = strtoul(optarg, NULL, 10);
-                break;
-            }
-            case 'e':
-                if (args->referer) free(args->referer);
-                args->referer = strdup(optarg);
-                if (!args->referer) {
-                    nurl_diag_err(
- "Out of memory while processing the --referer argument.");
-                    return -1;
-                }
-                break;
-            case 'f':
-                args->fail = true;
-                break;
-            case 21:
-                args->tls12 = true;
-                break;
-            case 22:
-                args->tls13 = true;
-                break;
-            case 'X':
-                if (args->method) free(args->method);
-                args->method = strdup(optarg);
-                if (!args->method) {
-                    nurl_diag_err(
- "Out of memory while processing the --request argument.");
-                    return -1;
-                }
-                break;
-            case 23:
-                if (args->upload_file) free(args->upload_file);
-                args->upload_file = strdup(optarg);
-                if (!args->upload_file) {
-                    nurl_diag_err(
- "Out of memory while processing the --upload argument.");
-                    return -1;
-                }
-                break;
-            case 'V':
-                printf("nurl %s\n", NURL_VERSION);
-                exit(0);
-            case 'h':
-                return -1; // Help requested
-            default:
-                nurl_diag_err("option '%s' is not recognized by nurl.", argv[optind - 1]);
-                nurl_diag_hint("run 'nurl --help' to see a list of all available options.");
-                return -1;
+            case 'u': if (set_arg_str(&args->user, optarg, "user")) return -1; break;
+            case 1:   if (set_arg_str(&args->bearer, optarg, "bearer")) return -1; break;
+            case 2:   if (set_arg_str(&args->token, optarg, "token")) return -1; break;
+            case 3:   args->no_auth = true; break;
+            case 'd': if (set_arg_str(&args->data, optarg, "data")) return -1; args->data_len = strlen(optarg); break;
+            case 'j': args->json = true; break;
+            case 'k': args->no_verify = true; break;
+            case 4:   if (set_arg_str(&args->cacert, optarg, "cacert")) return -1; break;
+            case 't': args->timeout = strtoul(optarg, NULL, 10); break;
+            case 'L': args->location = true; break;
+            case 'H': if (!strchr(optarg, ':')) { nurl_err(NURL_ERR_ARG, "invalid header '%s'", optarg); return -1; }
+                      if (append_arg_str(&args->header, &args->header_count, optarg, "header")) return -1; break;
+            case 'o': if (set_arg_str(&args->output, optarg, "output")) return -1; break;
+            case 'i': args->include = true; break;
+            case 'v': args->verbose = true; break;
+            case 's': args->silent = true; break;
+            case 5:   args->raw = true; break;
+            case 6:   args->ping_count = (unsigned int)strtoul(optarg, NULL, 10); break;
+            case 7:   args->ping_interval = strtoul(optarg, NULL, 10); break;
+            case 8:   args->resume = true; break;
+            case 9:   args->progress = true; break;
+            case 10:  if (set_arg_str(&args->upload_mime, optarg, "mime")) return -1; break;
+            case 11:  if (set_arg_str(&args->upload_name, optarg, "name")) return -1; break;
+            case 12:  if (append_arg_str(&args->upload_fields, &args->upload_fields_count, optarg, "field")) return -1; break;
+            case 'b': if (set_arg_str(&args->cookie, optarg, "cookie")) return -1; break;
+            case 'c': if (set_arg_str(&args->cookie_jar, optarg, "cookie-jar")) return -1; break;
+            case 13:  if (set_arg_str(&args->session, optarg, "session")) return -1; break;
+            case 'w': if (set_arg_str(&args->write_out, optarg, "write-out")) return -1; break;
+            case 14:  if (set_arg_str(&args->cert, optarg, "cert")) return -1; break;
+            case 15:  if (set_arg_str(&args->key, optarg, "key")) return -1; break;
+            case 'x': if (set_arg_str(&args->proxy, optarg, "proxy")) return -1; break;
+            case 16:  if (set_arg_str(&args->proxy_user, optarg, "proxy-user")) return -1; break;
+            case 17:  if (set_arg_str(&args->no_proxy, optarg, "no-proxy")) return -1; break;
+            case 'A': if (set_arg_str(&args->user_agent, optarg, "user-agent")) return -1; break;
+            case 18:  args->compressed = true; break;
+            case 19:  args->retry = (unsigned int)strtoul(optarg, NULL, 10); break;
+            case 20:  args->retry_delay = strtoul(optarg, NULL, 10); break;
+            case 'e': if (set_arg_str(&args->referer, optarg, "referer")) return -1; break;
+            case 'f': args->fail = true; break;
+            case 21:  args->tls12 = true; break;
+            case 22:  args->tls13 = true; break;
+            case 'X': if (set_arg_str(&args->method, optarg, "request")) return -1; break;
+            case 23:  if (set_arg_str(&args->upload_file, optarg, "upload")) return -1; break;
+            case 'V': printf("nurl %s\n", NURL_VERSION); exit(0);
+            case 'h': return -1;
+            default:  nurl_diag_err("option '%s' unrecognized.", argv[optind - 1]);
+                      nurl_diag_hint("run 'nurl --help' for usage."); return -1;
         }
     }
 
-    if (args->tls12 && args->tls13) {
-        nurl_err(NURL_ERR_ARG, "cannot enforce both TLS v1.2 and TLS v1.3");
-        return NURL_ERR_ARG;
-    }
-
-    int remaining = argc - optind;
-    if (remaining <= 0) {
-        nurl_err(NURL_ERR_ARG, "no URL specified!");
-        return NURL_ERR_ARG;
-    }
+    if (args->tls12 && args->tls13) { nurl_err(NURL_ERR_ARG, "conflicting TLS versions"); return -1; }
+    int rem = argc - optind;
+    if (rem <= 0) { nurl_err(NURL_ERR_ARG, "no URL specified!"); return -1; }
 
     const char *first = argv[optind];
     if (!is_subcommand(first) && !looks_like_url(first)) {
         nurl_err(NURL_ERR_ARG, "unknown command '%s'", first);
-        const char *suggestion = suggest_command(first);
-        if (suggestion) {
-            nurl_hint("did you mean: %s", suggestion);
-        } else {
-            nurl_hint("available commands: get, post, put, delete, head, patch, options, download, upload, inspect, ping, resolve");
-        }
-        return NURL_ERR_ARG;
+        const char *sug = suggest_command(first);
+        if (sug) nurl_hint("did you mean: %s", sug);
+        return -1;
     }
 
     if (is_subcommand(first)) {
         *command = strdup(first);
         if (strcasecmp(first, "upload") == 0) {
-            if (remaining >= 3) {
-                *url = strdup(argv[optind + 1]);
-                if (args->upload_file) free(args->upload_file);
-                args->upload_file = strdup(argv[optind + 2]);
-            } else if (remaining == 2 && args->upload_file) {
-                *url = strdup(argv[optind + 1]);
-            } else {
-                fprintf(stderr, "nurl: subcommand 'upload' requires target URL and local file path.\n");
-                free(*command);
-                *command = NULL;
-                return -1;
-            }
+            if (rem >= 3) { *url = strdup(argv[optind+1]); if (set_arg_str(&args->upload_file, argv[optind+2], "upload")) return -1; }
+            else if (rem == 2 && args->upload_file) *url = strdup(argv[optind+1]);
+            else { nurl_diag_err("upload requires URL and file."); return -1; }
         } else {
-            if (remaining >= 2) {
-                *url = strdup(argv[optind + 1]);
-            } else {
-                fprintf(stderr, "nurl: subcommand '%s' requires a target URL.\n", first);
-                free(*command);
-                *command = NULL;
-                return -1;
-            }
+            if (rem >= 2) *url = strdup(argv[optind+1]);
+            else { nurl_diag_err("command '%s' requires a URL.", first); return -1; }
         }
     } else {
-        // Implicit mode (URL first)
-        *command = strdup("get");
-        *url = strdup(first);
-        nurl_cli_infer_method(args, command);
+        *command = strdup("get"); *url = strdup(first); nurl_cli_infer_method(args, command);
     }
 
-    if (*url) {
-        char *norm = nurl_normalize_url(*url);
-        free(*url);
-        *url = norm;
-    }
-
+    if (*url) { char *norm = nurl_normalize_url(*url); free(*url); *url = norm; }
     return 0;
 }
 
 void nurl_cli_free_args(CommonArgs *args) {
-    if (args) {
-        free(args->method);
-        free(args->user);
-        free(args->bearer);
-        free(args->token);
-        free(args->data);
-        free(args->cacert);
-        free(args->output);
-        free(args->upload_file);
-        free(args->upload_name);
-        free(args->upload_mime);
-        free(args->cookie);
-        free(args->cookie_jar);
-        free(args->session);
-        free(args->write_out);
-        free(args->cert);
-        free(args->key);
-        free(args->proxy);
-        free(args->proxy_user);
-        free(args->no_proxy);
-        free(args->user_agent);
-        free(args->referer);
-        if (args->upload_fields) {
-            for (size_t i = 0; i < args->upload_fields_count; i++) {
-                free(args->upload_fields[i]);
-            }
-            free(args->upload_fields);
-        }
-        if (args->header) {
-            for (size_t i = 0; i < args->header_count; i++) {
-                free(args->header[i]);
-            }
-            free(args->header);
-        }
-        memset(args, 0, sizeof(CommonArgs));
+    if (!args) return;
+    free(args->method); free(args->user); free(args->bearer); free(args->token);
+    free(args->data); free(args->cacert); free(args->output); free(args->upload_file);
+    free(args->upload_name); free(args->upload_mime); free(args->cookie);
+    free(args->cookie_jar); free(args->session); free(args->write_out);
+    free(args->cert); free(args->key); free(args->proxy); free(args->proxy_user);
+    free(args->no_proxy); free(args->user_agent); free(args->referer);
+    if (args->upload_fields) {
+        for (size_t i = 0; i < args->upload_fields_count; i++) free(args->upload_fields[i]);
+        free(args->upload_fields);
     }
+    if (args->header) {
+        for (size_t i = 0; i < args->header_count; i++) free(args->header[i]);
+        free(args->header);
+    }
+    memset(args, 0, sizeof(CommonArgs));
 }

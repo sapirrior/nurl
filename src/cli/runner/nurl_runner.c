@@ -6,30 +6,34 @@
 #include <string.h>
 #include <strings.h>
 
+typedef int (*nurl_cmd_handler_t)(const char *url, const CommonArgs *common);
+
+typedef struct {
+    const char *name;
+    nurl_cmd_handler_t handler;
+} NurlCommand;
+
+static const NurlCommand commands[] = {
+    {"GET",      nurl_cmd_get},
+    {"POST",     nurl_cmd_post},
+    {"PUT",      nurl_cmd_put},
+    {"DELETE",   nurl_cmd_delete},
+    {"PATCH",    nurl_cmd_patch},
+    {"HEAD",     nurl_cmd_head},
+    {"OPTIONS",  nurl_cmd_options},
+    {"RESOLVE",  nurl_cmd_resolve},
+    {"PING",     nurl_cmd_ping},
+    {"DOWNLOAD", nurl_cmd_download},
+    {"UPLOAD",   nurl_cmd_upload},
+    {"INSPECT",  nurl_cmd_inspect},
+    {NULL,       NULL}
+};
+
 int nurl_runner_execute(const char *command, const char *url, const CommonArgs *common) {
-    if (strcasecmp(command, "GET") == 0 ||
-        strcasecmp(command, "POST") == 0 ||
-        strcasecmp(command, "PUT") == 0 ||
-        strcasecmp(command, "DELETE") == 0 ||
-        strcasecmp(command, "PATCH") == 0) {
-        return nurl_request_generic(command, url, common);
-    } else if (strcasecmp(command, "HEAD") == 0) {
-        // For HEAD command, we always want to include headers in the output.
-        CommonArgs args_copy = *common;
-        args_copy.include = true;
-        return nurl_request_generic("HEAD", url, &args_copy);
-    } else if (strcasecmp(command, "OPTIONS") == 0) {
-        return nurl_cmd_options(url, common);
-    } else if (strcasecmp(command, "RESOLVE") == 0) {
-        return nurl_cmd_resolve(url, common);
-    } else if (strcasecmp(command, "PING") == 0) {
-        return nurl_cmd_ping(url, common);
-    } else if (strcasecmp(command, "DOWNLOAD") == 0) {
-        return nurl_cmd_download(url, common);
-    } else if (strcasecmp(command, "UPLOAD") == 0) {
-        return nurl_cmd_upload(url, common);
-    } else if (strcasecmp(command, "INSPECT") == 0) {
-        return nurl_cmd_inspect(url, common);
+    for (int i = 0; commands[i].name != NULL; i++) {
+        if (strcasecmp(command, commands[i].name) == 0) {
+            return commands[i].handler(url, common);
+        }
     }
 
     nurl_diag_err("command '%s' is not supported by nurl.", command);

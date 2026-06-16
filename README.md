@@ -14,15 +14,15 @@ The codebase is organized into nested modules dividing user-interface commands f
 src/
 ├── main.c                  # Program entry point (WSA startup/cleanup)
 ├── cli/                    # CLI Interface Layer
-│   ├── parser/             # Argument parsing (nurl_cli.c)
-│   ├── runner/             # Subcommand routing & progress reporting (nurl_progress.c)
-│   └── commands/           # HTTP command drivers (download.c, upload.c, ping.c, etc.)
+│   ├── parser/             # Optimized argument parsing (nurl_cli.c)
+│   ├── runner/             # Dispatch table & progress reporting
+│   └── commands/           # Granular command drivers (get.c, post.c, download.c, etc.)
 ├── engine/                 # Protocol & Network Engine Layer
 │   ├── nurl_engine.c       # Central engine request orchestrator (Stage-based)
-│   ├── net/                # Buffered I/O (NurlStream) & Proxy handler
+│   ├── net/                # Buffered I/O (NurlStream) & Connection Pooling
 │   ├── tls/                # OpenSSL contexts & verification setup
-│   ├── http/               # HTTP parser, gzip/deflate decompression, redirects
-│   └── utils/              # Cookies manager, configurations, base64 & high-res time
+│   ├── http/               # HTTP parser, gzip/deflate, redirects
+│   └── utils/              # Cookies, base64, & config management
 └── errors/                 # Smart Error DX Layer
     ├── nurl_diag.c         # Concise Unix-style diagnostics
     ├── nurl_error_handler.c # Context-aware diagnostic logic
