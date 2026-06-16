@@ -40,6 +40,14 @@ nurl_err_t nurl_pool_acquire(NurlConnPool *pool, const char *host, int port, con
                 nurl_net_close(e->stream->fd);
                 nurl_stream_free(e->stream);
                 e->stream = NULL;
+            } else if (!nurl_net_is_alive(e->stream->fd)) {
+                if (req->verbose && !req->silent) {
+                    fprintf(stderr, "* Connection pool: pooled connection to %s:%d died, evicting\n", e->host, e->port);
+                }
+                if (e->stream->tls) nurl_tls_free(e->stream->tls);
+                nurl_net_close(e->stream->fd);
+                nurl_stream_free(e->stream);
+                e->stream = NULL;
             } else {
                 e->in_use = true;
                 *stream = e->stream;

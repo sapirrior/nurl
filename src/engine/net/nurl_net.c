@@ -17,6 +17,8 @@
   #include <sys/socket.h>
   #include <sys/time.h>
   #include <netdb.h>
+  #include <poll.h>
+  #include <errno.h>
   #define socket_close(fd) close(fd)
   #define socket_write(fd, buf, len) write(fd, buf, len)
   #define socket_read(fd, buf, len) read(fd, buf, len)
@@ -118,6 +120,41 @@ int nurl_net_set_timeout(int socket_fd, unsigned long seconds) {
     }
 #endif
     return 0;
+}
+
+bool nurl_net_is_alive(int socket_fd) {
+    if (socket_fd < 0) return false;
+
+#ifdef _WIN32
+    WSAPOLLFD pfd;
+    pfd.fd = (SOCKET)socket_fd;
+    pfd.events = POLLIN;
+    if (WSAPoll(&pfd, 1, 0) > 0) {
+        if (pfd.revents & (POLLHUP | POLLERR | POLLNVAL)) return false;
+        if (pfd.revents & POLLIN) {
+            char buf;
+            int r = recv((SOCKET)socket_fd, &buf, 1, MSG_PEEK);
+            if (r <= 0) return false;
+        }
+    }
+#else
+    struct pollfd pfd;
+    pfd.fd = socket_fd;
+    pfd.events = POLLIN;
+    int ret = poll(&pfd, 1, 0);
+    if (ret > 0) {
+        if (pfd.revents & (POLLHUP | POLLERR | POLLNVAL)) return false;
+        if (pfd.revents & POLLIN) {
+            char buf;
+            ssize_t r = recv(socket_fd, &buf, 1, MSG_PEEK | MSG_DONTWAIT);
+            if (r == 0) return false;
+            if (r < 0 && errno != EAGAIN && errno != EWOULDBLOCK) return false;
+        }
+    } else if (ret < 0) {
+        return false;
+    }
+#endif
+    return true;
 }
 
 int nurl_net_connect_proxy(

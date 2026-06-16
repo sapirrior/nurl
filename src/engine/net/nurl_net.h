@@ -2,6 +2,7 @@
 #define NURL_NET_H
 
 #include "errors/nurl_error.h"
+#include <stdbool.h>
 
 /**
  * Resolves the given hostname and connects to it over TCP on the specified port.
@@ -31,6 +32,12 @@ int nurl_net_connect_proxy_ex(const char *host, int port, const char *proxy, con
  * Returns 0 on success, or -1 on failure.
  */
 int nurl_net_set_timeout(int socket_fd, unsigned long seconds);
+
+/**
+ * Checks if a socket connection is still alive and healthy.
+ * Returns true if alive, false if closed or errored.
+ */
+bool nurl_net_is_alive(int socket_fd);
 
 /**
  * Closes the given socket file descriptor.

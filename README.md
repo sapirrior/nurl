@@ -171,6 +171,7 @@ By focusing on a rock-solid, manual implementation of the HTTP/1.1 state machine
 
 *   **Buffered I/O (8KB)**: Uses a unified `NurlStream` abstraction for both raw TCP and TLS, drastically reducing syscall overhead and improving throughput (especially during encrypted transfers).
 *   **HTTP/1.1**: The core engine, supporting keep-alive connection pooling, chunked transfers, and byte-range resumes.
+*   **Stable Connection Management**: Features a proactive connection pool with a 60-second idle-eviction policy and per-request socket sanity checks (via non-blocking poll) to prevent "Connection Reset" failures during reuse.
 *   **TLS 1.2/1.3**: Fully supported via OpenSSL with automatic ALPN negotiation.
 *   **Modular Pipeline**: Connections are orchestrated in distinct stages (DNS -> TCP -> Proxy -> TLS Handshake), ensuring that failures are accurately diagnosed at the correct layer.
 
