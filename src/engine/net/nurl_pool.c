@@ -97,12 +97,12 @@ nurl_err_t nurl_pool_acquire(NurlConnPool *pool, const char *host, int port, con
 
     // 3. Connect & handshake
     nurl_err_t conn_err = NURL_OK;
-    int fd = nurl_net_connect_proxy_ex(host, port, req->proxy, req->proxy_user, req->no_proxy, &conn_err);
+    int fd = nurl_net_connect_proxy_ex(host, port, req->proxy, req->proxy_user, req->no_proxy, req->connect_timeout_sec, &conn_err);
     if (fd < 0) {
         return conn_err;
     }
-    if (req->timeout_sec > 0) {
-        nurl_net_set_timeout(fd, req->timeout_sec);
+    if (req->read_timeout_sec > 0) {
+        nurl_net_set_timeout(fd, req->read_timeout_sec);
     }
 
     nurl_tls_t *t = nurl_tls_create(req->tls_verify, req->cacert, req->cert, req->key, req->tls_version == 12, req->tls_version == 13);

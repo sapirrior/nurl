@@ -32,7 +32,8 @@ void nurl_request_from_args(NurlRequest *req, const char *method, const char *ur
     req->body_len = a->data_len;
     req->body_is_stream = false;
 
-    req->timeout_sec = a->timeout;
+    req->read_timeout_sec = (unsigned int)a->timeout;
+    req->connect_timeout_sec = (unsigned int)a->connect_timeout;
     req->follow_redirect = a->location;
     req->retry_count = a->retry;
     req->retry_delay_sec = a->retry_delay;

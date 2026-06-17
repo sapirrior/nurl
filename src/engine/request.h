@@ -35,7 +35,8 @@ typedef struct {
     size_t           body_parts_count;
 
     /* Transfer config */
-    unsigned int     timeout_sec;
+    unsigned int     read_timeout_sec;
+    unsigned int     connect_timeout_sec;
     bool             follow_redirect;
     unsigned int     max_redirects;   /* default: 10 */
     unsigned int     retry_count;

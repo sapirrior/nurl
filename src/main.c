@@ -48,7 +48,8 @@ static void print_help(const char *prog_name) {
     printf("  -x, --proxy <val>     HTTP proxy URL or host:port to tunnel requests\n");
     printf("  --proxy-user <val>    Proxy authentication credentials (username:password)\n");
     printf("  --no-proxy <val>      Comma-separated list of hosts to bypass proxy for\n");
-    printf("  -t, --timeout <sec>   Maximum request timeout in seconds (default: 30)\n");
+    printf("  -t, --timeout <sec>   Maximum data transfer timeout in seconds (default: 30)\n");
+    printf("  --connect-timeout <sec> Maximum connection handshake timeout (default: 10)\n");
     printf("  -L, --location        Follow HTTP 3xx redirections\n");
     printf("  -H, --header <val>    Pass custom header line (e.g. \"X-Custom: value\")\n");
     printf("  -o, --output <file>   Save response body to local file\n");

@@ -6,7 +6,7 @@
 #include <ctype.h>
 
 #ifndef NURL_VERSION
-#define NURL_VERSION "0.2.0"
+#define NURL_VERSION "0.6.0"
 #endif
 
 #include <sys/time.h>

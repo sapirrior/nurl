@@ -14,7 +14,7 @@
 
 static NurlStream *connect_and_handshake(const char *host, int port, const CommonArgs *common) {
     nurl_err_t err = NURL_OK;
-    int fd = nurl_net_connect_proxy_ex(host, port, common->proxy, common->proxy_user, common->no_proxy, &err);
+    int fd = nurl_net_connect_proxy_ex(host, port, common->proxy, common->proxy_user, common->no_proxy, common->connect_timeout, &err);
     if (fd < 0) return NULL;
 
     nurl_tls_t *t = nurl_tls_create(!common->no_verify, common->cacert, common->cert, common->key, common->tls12, common->tls13);

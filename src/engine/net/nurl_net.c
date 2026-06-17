@@ -19,6 +19,7 @@
   #include <netdb.h>
   #include <poll.h>
   #include <errno.h>
+  #include <fcntl.h>
   #define socket_close(fd) close(fd)
   #define socket_write(fd, buf, len) write(fd, buf, len)
   #define socket_read(fd, buf, len) read(fd, buf, len)
@@ -41,10 +42,10 @@ void nurl_net_cleanup(void) {
 }
 
 int nurl_net_connect(const char *hostname, int port) {
-    return nurl_net_connect_ex(hostname, port, NULL);
+    return nurl_net_connect_ex(hostname, port, 10, NULL);
 }
 
-int nurl_net_connect_ex(const char *hostname, int port, nurl_err_t *out_err) {
+int nurl_net_connect_ex(const char *hostname, int port, unsigned int connect_timeout_sec, nurl_err_t *out_err) {
     char port_str[16];
     snprintf(port_str, sizeof(port_str), "%d", port);
 
@@ -76,13 +77,68 @@ int nurl_net_connect_ex(const char *hostname, int port, nurl_err_t *out_err) {
             continue;
         }
 
-        if (connect(socket_fd, rp->ai_addr, rp->ai_addrlen) != -1) {
-            last_err = NURL_OK;
-            break; /* Connected successfully */
+        /* Set non-blocking */
+#ifdef _WIN32
+        unsigned long mode = 1;
+        ioctlsocket((SOCKET)socket_fd, FIONBIO, &mode);
+#else
+        int flags = fcntl(socket_fd, F_GETFL, 0);
+        fcntl(socket_fd, F_SETFL, flags | O_NONBLOCK);
+#endif
+
+        int res = connect(socket_fd, rp->ai_addr, rp->ai_addrlen);
+        if (res == -1) {
+#ifdef _WIN32
+            int err = WSAGetLastError();
+            if (err != WSAEWOULDBLOCK) {
+#else
+            if (errno != EINPROGRESS) {
+#endif
+                socket_close(socket_fd);
+                socket_fd = -1;
+                continue;
+            }
+
+            /* Wait for connection */
+#ifdef _WIN32
+            WSAPOLLFD pfd;
+            pfd.fd = (SOCKET)socket_fd;
+            pfd.events = POLLOUT;
+            int poll_res = WSAPoll(&pfd, 1, connect_timeout_sec * 1000);
+#else
+            struct pollfd pfd;
+            pfd.fd = socket_fd;
+            pfd.events = POLLOUT;
+            int poll_res = poll(&pfd, 1, connect_timeout_sec * 1000);
+#endif
+
+            if (poll_res <= 0) {
+                if (poll_res == 0) last_err = NURL_ERR_TIMEOUT;
+                socket_close(socket_fd);
+                socket_fd = -1;
+                continue;
+            }
+
+            /* Check for errors */
+            int optval;
+            socklen_t optlen = sizeof(optval);
+            if (getsockopt(socket_fd, SOL_SOCKET, SO_ERROR, (void *)&optval, &optlen) < 0 || optval != 0) {
+                socket_close(socket_fd);
+                socket_fd = -1;
+                continue;
+            }
         }
 
-        socket_close(socket_fd);
-        socket_fd = -1;
+        /* Set back to blocking */
+#ifdef _WIN32
+        mode = 0;
+        ioctlsocket((SOCKET)socket_fd, FIONBIO, &mode);
+#else
+        fcntl(socket_fd, F_SETFL, flags);
+#endif
+
+        last_err = NURL_OK;
+        break; /* Connected successfully */
     }
 
     freeaddrinfo(result);
@@ -161,12 +217,13 @@ int nurl_net_connect_proxy(
     const char *host, int port,
     const char *proxy, const char *proxy_user, const char *no_proxy
 ) {
-    return nurl_net_connect_proxy_ex(host, port, proxy, proxy_user, no_proxy, NULL);
+    return nurl_net_connect_proxy_ex(host, port, proxy, proxy_user, no_proxy, 10, NULL);
 }
 
 int nurl_net_connect_proxy_ex(
     const char *host, int port,
     const char *proxy, const char *proxy_user, const char *no_proxy,
+    unsigned int connect_timeout_sec,
     nurl_err_t *out_err
 ) {
     bool use_proxy = false;
@@ -212,7 +269,7 @@ int nurl_net_connect_proxy_ex(
     }
 
     if (!use_proxy) {
-        return nurl_net_connect_ex(host, port, out_err);
+        return nurl_net_connect_ex(host, port, connect_timeout_sec, out_err);
     }
 
     // Parse proxy string
@@ -241,7 +298,7 @@ int nurl_net_connect_proxy_ex(
         return -1;
     }
 
-    int socket_fd = nurl_net_connect_ex(proxy_host, proxy_port, out_err);
+    int socket_fd = nurl_net_connect_ex(proxy_host, proxy_port, connect_timeout_sec, out_err);
     free(proxy_host);
 
     if (socket_fd < 0) {

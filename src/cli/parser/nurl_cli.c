@@ -128,7 +128,8 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
         {"help", 0, 0, 'h'}, {"cert", 1, 0, 14}, {"key", 1, 0, 15}, {"proxy", 1, 0, 'x'},
         {"proxy-user", 1, 0, 16}, {"no-proxy", 1, 0, 17}, {"user-agent", 1, 0, 'A'}, {"compressed", 0, 0, 18},
         {"retry", 1, 0, 19}, {"retry-delay", 1, 0, 20}, {"referer", 1, 0, 'e'}, {"fail", 0, 0, 'f'},
-        {"tls1.2", 0, 0, 21}, {"tls1.3", 0, 0, 22}, {"request", 1, 0, 'X'}, {"upload", 1, 0, 23}, {0, 0, 0, 0}
+        {"tls1.2", 0, 0, 21}, {"tls1.3", 0, 0, 22}, {"request", 1, 0, 'X'}, {"upload", 1, 0, 23},
+        {"connect-timeout", 1, 0, 24}, {0, 0, 0, 0}
     };
 
     int opt; opterr = 0;
@@ -177,6 +178,7 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
             case 22:  args->tls13 = true; break;
             case 'X': if (set_arg_str(&args->method, optarg, "request")) return -1; break;
             case 23:  if (set_arg_str(&args->upload_file, optarg, "upload")) return -1; break;
+            case 24:  args->connect_timeout = strtoul(optarg, NULL, 10); break;
             case 'V': printf("nurl %s\n", NURL_VERSION); exit(0);
             case 'h': return -1;
             default:  nurl_diag_err("option '%s' unrecognized.", argv[optind - 1]);

@@ -75,14 +75,14 @@ int nurl_engine_execute_request(
             sock_fd = stream->fd;
         } else {
             // Stage 1: Connect (TCP + Proxy Tunneling)
-            sock_fd = nurl_net_connect_proxy_ex(host, port, req->proxy, req->proxy_user, req->no_proxy, &conn_err);
+            sock_fd = nurl_net_connect_proxy_ex(host, port, req->proxy, req->proxy_user, req->no_proxy, req->connect_timeout_sec, &conn_err);
             if (sock_fd < 0) {
                 free(scheme); free(host); free(path); free(current_url);
                 return conn_err;
             }
 
-            if (req->timeout_sec > 0) {
-                nurl_net_set_timeout(sock_fd, req->timeout_sec);
+            if (req->read_timeout_sec > 0) {
+                nurl_net_set_timeout(sock_fd, req->read_timeout_sec);
             }
 
             // Stage 2: TLS Creation

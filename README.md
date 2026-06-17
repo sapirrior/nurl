@@ -156,6 +156,8 @@ nurl resolve httpbin.org
 | `-f, --fail` | Fail silently on server errors, suppressing body outputs and returning exit codes 22 (4xx) or 43 (5xx). |
 | `--retry <num>` | Number of retries on transient connection or 5xx failures. |
 | `--retry-delay <sec>` | Wait duration between retries in seconds (default: 1). |
+| `-t, --timeout <sec>` | Maximum request data transfer timeout in seconds (default: 30). |
+| `--connect-timeout <sec>` | Maximum time allowed for the initial TCP/TLS connection handshake (default: 10). |
 | `--tls1.2` | Enforce TLS v1.2 connections only. |
 | `--tls1.3` | Enforce TLS v1.3 connections only. |
 | `-k, --no-verify` | Skip TLS certificate validation (useful for localhost self-signed APIs). |
