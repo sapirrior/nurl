@@ -7,7 +7,7 @@ void nurl_handle_request_error(nurl_err_t err, const NurlRequest *req, const cha
     if (err == NURL_OK) return;
 
     switch (err) {
-        case NURL_ERR_INVALID_URL:
+        case NURL_ERR_URL:
             nurl_diag_err("malformed URL '%s' provided.", target_url);
             nurl_diag_hint("ensure the URL uses a supported scheme like 'http://' or 'https://' and has a valid hostname.");
             break;

@@ -1,49 +1,30 @@
 #include "nurl_http.h"
+#include "compat/nurl_compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <ctype.h>
-
-#ifndef NURL_VERSION
-#define NURL_VERSION "0.6.0"
-#endif
-
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 nurl_err_t nurl_http_request(
     NurlStream *stream,
-    const char *method,
-    const char *path,
-    const char *hostname,
-    const char *extra_headers,
-    const unsigned char *body,
-    size_t body_len,
-    NurlBodyPart *body_parts,
-    size_t body_parts_count,
-    FILE *body_out,
-    bool show_progress,
-    bool silent,
-    unsigned long resume_offset,
-    nurl_progress_cb progress_cb,
-    void *progress_data,
+    const NurlHttpParams *p,
     nurl_http_response_t **out_response
 ) {
-    (void)show_progress;
-    (void)silent;
     if (out_response) *out_response = NULL;
 
-    size_t total_body_len = body_len;
-    if (body_parts && body_parts_count > 0) {
+    size_t total_body_len = p->body_len;
+    if (p->body_parts && p->body_parts_count > 0) {
         total_body_len = 0;
-        for (size_t i = 0; i < body_parts_count; i++) {
-            if (body_parts[i].type == NURL_BODY_PART_MEM) {
-                total_body_len += body_parts[i].len;
-            } else if (body_parts[i].type == NURL_BODY_PART_FILE) {
+        for (size_t i = 0; i < p->body_parts_count; i++) {
+            if (p->body_parts[i].type == NURL_BODY_PART_MEM) {
+                total_body_len += p->body_parts[i].len;
+            } else if (p->body_parts[i].type == NURL_BODY_PART_FILE) {
                 struct stat st;
-                if (stat(body_parts[i].filepath, &st) == 0) {
+                if (nurl_stat(p->body_parts[i].filepath, &st) == 0) {
                     total_body_len += st.st_size;
                 }
             }
@@ -51,7 +32,7 @@ nurl_err_t nurl_http_request(
     }
 
     // 1. Construct HTTP request headers
-    size_t req_capacity = 4096 + (extra_headers ? strlen(extra_headers) : 0);
+    size_t req_capacity = 4096 + (p->extra_headers ? strlen(p->extra_headers) : 0);
     char *req_buf = malloc(req_capacity);
     if (!req_buf) {
         return NURL_ERR_OOM;
@@ -59,33 +40,33 @@ nurl_err_t nurl_http_request(
 
     bool has_user_agent = false;
     bool has_connection = false;
-    if (extra_headers) {
-        const char *p = extra_headers;
-        while ((p = strcasestr(p, "User-Agent")) != NULL) {
-            if (p == extra_headers || p[-1] == '\n' || p[-1] == '\r') {
-                const char *colon = strchr(p, ':');
+    if (p->extra_headers) {
+        const char *eh = p->extra_headers;
+        while ((eh = nurl_strcasestr(eh, "User-Agent")) != NULL) {
+            if (eh == p->extra_headers || eh[-1] == '\n' || eh[-1] == '\r') {
+                const char *colon = strchr(eh, ':');
                 if (colon) {
                     has_user_agent = true;
                     break;
                 }
             }
-            p++;
+            eh++;
         }
-        p = extra_headers;
-        while ((p = strcasestr(p, "Connection")) != NULL) {
-            if (p == extra_headers || p[-1] == '\n' || p[-1] == '\r') {
-                const char *colon = strchr(p, ':');
+        eh = p->extra_headers;
+        while ((eh = nurl_strcasestr(eh, "Connection")) != NULL) {
+            if (eh == p->extra_headers || eh[-1] == '\n' || eh[-1] == '\r') {
+                const char *colon = strchr(eh, ':');
                 if (colon) {
                     has_connection = true;
                     break;
                 }
             }
-            p++;
+            eh++;
         }
     }
 
     int written;
-    written = snprintf(req_buf, req_capacity, "%s %s HTTP/1.1\r\nHost: %s\r\n", method, path, hostname);
+    written = snprintf(req_buf, req_capacity, "%s %s HTTP/1.1\r\nHost: %s\r\n", p->method, p->path, p->hostname);
     if (!has_user_agent) {
         written += snprintf(req_buf + written, req_capacity - written, "User-Agent: nurl/" NURL_VERSION "\r\n");
     }
@@ -98,8 +79,8 @@ nurl_err_t nurl_http_request(
             "Content-Length: %zu\r\n", total_body_len);
     }
 
-    if (extra_headers) {
-        written += snprintf(req_buf + written, req_capacity - written, "%s", extra_headers);
+    if (p->extra_headers) {
+        written += snprintf(req_buf + written, req_capacity - written, "%s", p->extra_headers);
     }
 
     // Append final CRLF separating headers and body
@@ -113,9 +94,9 @@ nurl_err_t nurl_http_request(
     free(req_buf);
 
     // Send HTTP Body Parts if present
-    if (body_parts && body_parts_count > 0) {
-        for (size_t i = 0; i < body_parts_count; i++) {
-            NurlBodyPart *part = &body_parts[i];
+    if (p->body_parts && p->body_parts_count > 0) {
+        for (size_t i = 0; i < p->body_parts_count; i++) {
+            NurlBodyPart *part = &p->body_parts[i];
             if (part->type == NURL_BODY_PART_MEM) {
                 if (part->data && part->len > 0) {
                     if (nurl_stream_write(stream, part->data, part->len) <= 0) {
@@ -140,8 +121,8 @@ nurl_err_t nurl_http_request(
                 }
             }
         }
-    } else if (body && body_len > 0) {
-        if (nurl_stream_write(stream, body, body_len) <= 0) {
+    } else if (p->body && p->body_len > 0) {
+        if (nurl_stream_write(stream, p->body, p->body_len) <= 0) {
             return NURL_ERR_NETWORK;
         }
     }
@@ -169,9 +150,9 @@ nurl_err_t nurl_http_request(
         if (status_text_start) {
             status_text_start++;
             // Trim \r\n
-            char *p = status_text_start;
-            while (*p && *p != '\r' && *p != '\n') p++;
-            *p = '\0';
+            char *ptr = status_text_start;
+            while (*ptr && *ptr != '\r' && *ptr != '\n') ptr++;
+            *ptr = '\0';
             res->status_text = strdup(status_text_start);
         } else {
             res->status_text = strdup("Unknown");
@@ -197,10 +178,10 @@ nurl_err_t nurl_http_request(
         }
 
         // Trim trailing CRLF for strdup
-        char *p = line_buf + line_len - 1;
-        while (p >= line_buf && (*p == '\r' || *p == '\n')) {
-            *p = '\0';
-            p--;
+        char *ptr = line_buf + line_len - 1;
+        while (ptr >= line_buf && (*ptr == '\r' || *ptr == '\n')) {
+            *ptr = '\0';
+            ptr--;
         }
 
         char **temp = realloc(res->headers, sizeof(char *) * (res->header_count + 1));
@@ -223,11 +204,11 @@ nurl_err_t nurl_http_request(
             char *key = line_buf;
             char *val = colon + 1;
             while (isspace((unsigned char)*val)) val++;
-            if (strcasecmp(key, "Transfer-Encoding") == 0 && strcasecmp(val, "chunked") == 0) {
+            if (nurl_strcasecmp(key, "Transfer-Encoding") == 0 && nurl_strcasecmp(val, "chunked") == 0) {
                 is_chunked = true;
-            } else if (strcasecmp(key, "Content-Length") == 0) {
+            } else if (nurl_strcasecmp(key, "Content-Length") == 0) {
                 content_len = strtoul(val, NULL, 10);
-            } else if (strcasecmp(key, "Content-Range") == 0) {
+            } else if (nurl_strcasecmp(key, "Content-Range") == 0) {
                 char *slash = strchr(val, '/');
                 if (slash) {
                     total_len = strtoul(slash + 1, NULL, 10);
@@ -236,25 +217,25 @@ nurl_err_t nurl_http_request(
         }
     }
 
-    if (strcasecmp(method, "HEAD") == 0) {
+    if (nurl_strcasecmp(p->method, "HEAD") == 0) {
         if (out_response) *out_response = res;
         return NURL_OK;
     }
 
     unsigned long total_len_computed = total_len;
-    bool is_resume = (res->status_code == 206 && resume_offset > 0);
+    bool is_resume = (res->status_code == 206 && p->resume_offset > 0);
     if (total_len_computed == 0) {
-        total_len_computed = is_resume ? (content_len + resume_offset) : content_len;
+        total_len_computed = is_resume ? (content_len + p->resume_offset) : content_len;
     }
 
-    unsigned long downloaded = resume_offset;
+    unsigned long downloaded = p->resume_offset;
 
     // 3. Read body from socket (either streaming to body_out or accumulating in memory)
     if (is_chunked) {
         size_t body_cap = 8192;
         size_t body_len = 0;
         unsigned char *body_buf = NULL;
-        if (!body_out) {
+        if (!p->body_out) {
             body_buf = malloc(body_cap);
             if (!body_buf) {
                 nurl_http_response_free(res);
@@ -289,8 +270,8 @@ nurl_err_t nurl_http_request(
                     return NURL_ERR_NETWORK;
                 }
 
-                if (body_out) {
-                    fwrite(chunk_buf, 1, n, body_out);
+                if (p->body_out) {
+                    fwrite(chunk_buf, 1, n, p->body_out);
                 } else {
                     if (body_len + n >= body_cap) {
                         body_cap = (body_cap + n) * 2;
@@ -307,7 +288,7 @@ nurl_err_t nurl_http_request(
                 body_len += n;
                 read_chunk += n;
                 downloaded += n;
-                if (progress_cb) progress_cb(downloaded, total_len_computed, false, progress_data);
+                if (p->progress_cb) p->progress_cb(downloaded, total_len_computed, false, p->progress_data);
             }
 
             // Consume trailing CRLF of this chunk
@@ -315,7 +296,7 @@ nurl_err_t nurl_http_request(
             nurl_stream_read_exact(stream, dummy, 2);
         }
 
-        if (!body_out && body_buf) {
+        if (!p->body_out && body_buf) {
             body_buf[body_len] = '\0';
             res->body = body_buf;
             res->body_len = body_len;
@@ -323,7 +304,7 @@ nurl_err_t nurl_http_request(
     } else if (content_len > 0) {
         size_t body_len = 0;
         unsigned char *body_buf = NULL;
-        if (!body_out) {
+        if (!p->body_out) {
             body_buf = malloc(content_len + 1);
             if (!body_buf) {
                 nurl_http_response_free(res);
@@ -338,17 +319,17 @@ nurl_err_t nurl_http_request(
             int n = nurl_stream_read(stream, chunk_buf, to_read);
             if (n <= 0) break; // Premature EOF
 
-            if (body_out) {
-                fwrite(chunk_buf, 1, n, body_out);
+            if (p->body_out) {
+                fwrite(chunk_buf, 1, n, p->body_out);
             } else {
                 memcpy(body_buf + body_len, chunk_buf, n);
             }
             body_len += n;
             downloaded += n;
-            if (progress_cb) progress_cb(downloaded, total_len_computed, false, progress_data);
+            if (p->progress_cb) p->progress_cb(downloaded, total_len_computed, false, p->progress_data);
         }
 
-        if (!body_out && body_buf) {
+        if (!p->body_out && body_buf) {
             body_buf[body_len] = '\0';
             res->body = body_buf;
             res->body_len = body_len;
@@ -358,7 +339,7 @@ nurl_err_t nurl_http_request(
         size_t body_cap = 8192;
         size_t body_len = 0;
         unsigned char *body_buf = NULL;
-        if (!body_out) {
+        if (!p->body_out) {
             body_buf = malloc(body_cap);
             if (!body_buf) {
                 nurl_http_response_free(res);
@@ -369,8 +350,8 @@ nurl_err_t nurl_http_request(
         char chunk_buf[4096];
         int n;
         while ((n = nurl_stream_read(stream, chunk_buf, sizeof(chunk_buf))) > 0) {
-            if (body_out) {
-                fwrite(chunk_buf, 1, n, body_out);
+            if (p->body_out) {
+                fwrite(chunk_buf, 1, n, p->body_out);
             } else {
                 if (body_len + n >= body_cap) {
                     body_cap = (body_cap + n) * 2;
@@ -386,21 +367,17 @@ nurl_err_t nurl_http_request(
             }
             body_len += n;
             downloaded += n;
-            if (progress_cb) progress_cb(downloaded, total_len_computed, false, progress_data);
+            if (p->progress_cb) p->progress_cb(downloaded, total_len_computed, false, p->progress_data);
         }
 
-        if (!body_out && body_buf) {
+        if (!p->body_out && body_buf) {
             body_buf[body_len] = '\0';
             res->body = body_buf;
             res->body_len = body_len;
         }
     }
 
-    if (progress_cb) progress_cb(downloaded, total_len_computed, true, progress_data);
-
-    if (show_progress && !silent) {
-        fprintf(stderr, "\n");
-    }
+    if (p->progress_cb) p->progress_cb(downloaded, total_len_computed, true, p->progress_data);
 
     if (out_response) *out_response = res;
     return NURL_OK;

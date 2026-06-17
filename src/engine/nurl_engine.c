@@ -7,6 +7,8 @@
 #include "nurl_cookies.h"
 #include "nurl_decompress.h"
 #include "nurl_redirect.h"
+#include "errors/nurl_diag.h"
+#include "compat/nurl_compat.h"
 #include <sys/time.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,8 +29,14 @@ static void cleanup_global_pool(void) {
 int nurl_engine_execute_request(
     NurlRequest *req,
     nurl_http_response_t **out_response,
-    char **out_effective_url
+    char **out_effective_url,
+    NurlOperationStats *out_stats
 ) {
+    if (out_stats) {
+        out_stats->connect_time_sec = 0;
+        out_stats->num_redirects = 0;
+    }
+
     if (!global_pool) {
         global_pool = nurl_pool_create();
         if (global_pool) {
@@ -51,14 +59,10 @@ int nurl_engine_execute_request(
 
         if (nurl_utils_parse_url(current_url, &scheme, &host, &port, &path) != 0) {
             free(current_url);
-            return NURL_ERR_INVALID_URL;
+            return NURL_ERR_URL;
         }
 
-        bool use_tls = (strcmp(scheme, "https") == 0);
-        if (!use_tls) {
-            free(scheme); free(host); free(path); free(current_url);
-            return NURL_ERR_INVALID_URL;
-        }
+        bool use_tls = (nurl_strcasecmp(scheme, "https") == 0);
 
         int sock_fd = -1;
         nurl_tls_t *tls = NULL;
@@ -66,7 +70,7 @@ int nurl_engine_execute_request(
         nurl_err_t conn_err = NURL_OK;
 
         if (req->pool) {
-            nurl_err_t acquire_err = nurl_pool_acquire(req->pool, host, port, req, &stream);
+            nurl_err_t acquire_err = nurl_pool_acquire(req->pool, host, port, use_tls, req, &stream);
             if (acquire_err != NURL_OK) {
                 free(scheme); free(host); free(path); free(current_url);
                 return acquire_err;
@@ -74,36 +78,42 @@ int nurl_engine_execute_request(
             tls = stream->tls;
             sock_fd = stream->fd;
         } else {
+            double conn_start = nurl_utils_get_time_sec();
             // Stage 1: Connect (TCP + Proxy Tunneling)
             sock_fd = nurl_net_connect_proxy_ex(host, port, req->proxy, req->proxy_user, req->no_proxy, req->connect_timeout_sec, &conn_err);
             if (sock_fd < 0) {
                 free(scheme); free(host); free(path); free(current_url);
                 return conn_err;
             }
+            if (out_stats && redirects_followed == 0) {
+                out_stats->connect_time_sec = nurl_utils_get_time_sec() - conn_start;
+            }
 
             if (req->read_timeout_sec > 0) {
                 nurl_net_set_timeout(sock_fd, req->read_timeout_sec);
             }
 
-            // Stage 2: TLS Creation
-            tls = nurl_tls_create(req->tls_verify, req->cacert, req->cert, req->key, req->tls_version == 12, req->tls_version == 13);
-            if (!tls) {
-                nurl_net_close(sock_fd);
-                free(scheme); free(host); free(path); free(current_url);
-                return NURL_ERR_TLS;
-            }
+            if (use_tls) {
+                // Stage 2: TLS Creation
+                tls = nurl_tls_create(req->tls_verify, req->cacert, req->cert, req->key, req->tls_version == 12, req->tls_version == 13);
+                if (!tls) {
+                    nurl_net_close(sock_fd);
+                    free(scheme); free(host); free(path); free(current_url);
+                    return NURL_ERR_TLS;
+                }
 
-            // Stage 3: TLS Handshake
-            if (nurl_tls_handshake(tls, sock_fd, host) != 0) {
-                nurl_tls_free(tls);
-                nurl_net_close(sock_fd);
-                free(scheme); free(host); free(path); free(current_url);
-                return NURL_ERR_TLS_HANDSHAKE;
+                // Stage 3: TLS Handshake
+                if (nurl_tls_handshake(tls, sock_fd, host) != 0) {
+                    nurl_tls_free(tls);
+                    nurl_net_close(sock_fd);
+                    free(scheme); free(host); free(path); free(current_url);
+                    return NURL_ERR_TLS_HANDSHAKE;
+                }
             }
 
             stream = nurl_stream_new(sock_fd, tls);
             if (!stream) {
-                nurl_tls_free(tls);
+                if (tls) nurl_tls_free(tls);
                 nurl_net_close(sock_fd);
                 free(scheme); free(host); free(path); free(current_url);
                 return NURL_ERR_OOM;
@@ -211,10 +221,11 @@ int nurl_engine_execute_request(
             return NURL_ERR_OOM;
         }
 
-        const char *proto = nurl_tls_get_negotiated_proto(tls);
+        const char *proto = tls ? nurl_tls_get_negotiated_proto(tls) : "none";
         if (req->verbose && !req->silent) {
             fprintf(stderr, "* Connected to %s port %d\n", host, port);
-            fprintf(stderr, "* TLS handshake complete (ALPN: %s)\n*\n", proto ? proto : "none");
+            if (tls) fprintf(stderr, "* TLS handshake complete (ALPN: %s)\n*\n", proto ? proto : "none");
+            else fprintf(stderr, "* Connected via plaintext HTTP\n*\n");
             fprintf(stderr, "> %s %s HTTP/1.1\n", req->method, path);
             fprintf(stderr, "> Host: %s\n", host);
             fprintf(stderr, "> Connection: close\n");
@@ -237,7 +248,21 @@ int nurl_engine_execute_request(
             fprintf(stderr, "> \n");
         }
 
-        nurl_err_t exec_err = nurl_http_request(stream, req->method, path, host, extra_hdr, req->body, req->body_len, req->body_parts, req->body_parts_count, req->out, req->progress, req->silent, req->resume_offset, req->progress_cb, req->progress_data, &res);
+        NurlHttpParams http_params = {0};
+        http_params.method = req->method;
+        http_params.path = path;
+        http_params.hostname = host;
+        http_params.extra_headers = extra_hdr;
+        http_params.body = req->body;
+        http_params.body_len = req->body_len;
+        http_params.body_parts = req->body_parts;
+        http_params.body_parts_count = req->body_parts_count;
+        http_params.body_out = req->out;
+        http_params.resume_offset = req->resume_offset;
+        http_params.progress_cb = req->progress_cb;
+        http_params.progress_data = req->progress_data;
+
+        nurl_err_t exec_err = nurl_http_request(stream, &http_params, &res);
         free(extra_hdr);
 
         if (exec_err != NURL_OK) {
@@ -256,10 +281,10 @@ int nurl_engine_execute_request(
         if (req->decompress && res && res->body_len > 0) {
             bool is_compressed = false;
             for (size_t i = 0; i < res->header_count; i++) {
-                if (strncasecmp(res->headers[i], "Content-Encoding:", 17) == 0) {
+                if (nurl_strncasecmp(res->headers[i], "Content-Encoding:", 17) == 0) {
                     char *encoding = res->headers[i] + 17;
                     while (*encoding && isspace((unsigned char)*encoding)) encoding++;
-                    if (strcasecmp(encoding, "gzip") == 0 || strcasecmp(encoding, "deflate") == 0) {
+                    if (nurl_strcasecmp(encoding, "gzip") == 0 || nurl_strcasecmp(encoding, "deflate") == 0) {
                         is_compressed = true;
                         break;
                     }
@@ -290,7 +315,7 @@ int nurl_engine_execute_request(
 
             if (save_jar) {
                 for (size_t i = 0; i < res->header_count; i++) {
-                    if (strncasecmp(res->headers[i], "Set-Cookie:", 11) == 0) {
+                    if (nurl_strncasecmp(res->headers[i], "Set-Cookie:", 11) == 0) {
                         char *val = strdup(res->headers[i] + 11);
                         if (!val) continue;
 
@@ -326,14 +351,14 @@ int nurl_engine_execute_request(
                                         *attr_eq = '\0';
                                         char *k_attr = nurl_utils_trim(attr);
                                         char *v_attr = nurl_utils_trim(attr_eq + 1);
-                                        if (strcasecmp(k_attr, "domain") == 0) {
+                                        if (nurl_strcasecmp(k_attr, "domain") == 0) {
                                             domain = strdup(v_attr);
-                                        } else if (strcasecmp(k_attr, "path") == 0) {
+                                        } else if (nurl_strcasecmp(k_attr, "path") == 0) {
                                             cookie_path = strdup(v_attr);
                                         }
                                     } else {
                                         char *k_attr = nurl_utils_trim(attr);
-                                        if (strcasecmp(k_attr, "secure") == 0) {
+                                        if (nurl_strcasecmp(k_attr, "secure") == 0) {
                                             secure = true;
                                         }
                                     }
@@ -380,7 +405,7 @@ int nurl_engine_execute_request(
         if (req->follow_redirect && res->status_code >= 300 && res->status_code < 400) {
             char *redir_url = NULL;
             for (size_t i = 0; i < res->header_count; i++) {
-                if (strncasecmp(res->headers[i], "Location:", 9) == 0) {
+                if (nurl_strncasecmp(res->headers[i], "Location:", 9) == 0) {
                     char *val = res->headers[i] + 9;
                     while (*val && isspace((unsigned char)*val)) val++;
                     redir_url = nurl_resolve_redirect(current_url, val);
@@ -389,11 +414,21 @@ int nurl_engine_execute_request(
             }
 
             if (redir_url) {
+                bool keep_alive = true;
+                for (size_t i = 0; i < res->header_count; i++) {
+                    if (nurl_strncasecmp(res->headers[i], "Connection:", 11) == 0) {
+                        char *val = res->headers[i] + 11;
+                        while (*val && isspace((unsigned char)*val)) val++;
+                        if (nurl_strcasecmp(val, "close") == 0) { keep_alive = false; }
+                        break;
+                    }
+                }
                 nurl_http_response_free(res);
                 if (req->pool) {
-                    nurl_pool_release(req->pool, host, port, stream);
+                    if (keep_alive) nurl_pool_release(req->pool, host, port, stream);
+                    else nurl_pool_evict(req->pool, stream);
                 } else {
-                    nurl_tls_free(tls);
+                    if (tls) nurl_tls_free(tls);
                     nurl_net_close(sock_fd);
                     nurl_stream_free(stream);
                 }
@@ -404,7 +439,7 @@ int nurl_engine_execute_request(
                 redirects_followed++;
 
                 if (redirects_followed >= max_redirects) {
-                    fprintf(stderr, "Error: Maximum redirect limit exceeded (%d).\n", max_redirects);
+                    nurl_diag_err("maximum redirect limit exceeded (%d).", max_redirects);
                     free(current_url);
                     return NURL_ERR_GENERIC;
                 }
@@ -416,10 +451,10 @@ int nurl_engine_execute_request(
             bool keep_alive = true;
             if (res) {
                 for (size_t i = 0; i < res->header_count; i++) {
-                    if (strncasecmp(res->headers[i], "Connection:", 11) == 0) {
+                    if (nurl_strncasecmp(res->headers[i], "Connection:", 11) == 0) {
                         char *val = res->headers[i] + 11;
                         while (*val && isspace((unsigned char)*val)) val++;
-                        if (strcasecmp(val, "close") == 0) {
+                        if (nurl_strcasecmp(val, "close") == 0) {
                             keep_alive = false;
                         }
                         break;
@@ -434,7 +469,7 @@ int nurl_engine_execute_request(
                 nurl_pool_evict(req->pool, stream);
             }
         } else {
-            nurl_tls_free(tls);
+            if (tls) nurl_tls_free(tls);
             nurl_net_close(sock_fd);
             nurl_stream_free(stream);
         }
@@ -447,6 +482,10 @@ int nurl_engine_execute_request(
         *out_effective_url = current_url;
     } else {
         free(current_url);
+    }
+
+    if (out_stats) {
+        out_stats->num_redirects = redirects_followed;
     }
 
     return NURL_OK;

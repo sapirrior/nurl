@@ -1,8 +1,10 @@
 #include "nurl_request.h"
 #include "nurl_engine.h"
 #include "request.h"
-#include "nurl_utils.h"
+#include "utils/nurl_utils.h"
+#include "utils/nurl_buf.h"
 #include "errors/nurl_error_handler.h"
+#include "compat/nurl_compat.h"
 #include <sys/time.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,122 +12,79 @@
 #include <unistd.h>
 #include <ctype.h>
 
-static char *string_replace(const char *orig, const char *rep, const char *with) {
-    char *result;
-    const char *ins;
-    char *tmp;
-    int len_rep;
-    int len_with;
-    int len_front;
-    int count;
-
-    if (!orig || !rep)
-        return NULL;
-    len_rep = strlen(rep);
-    if (len_rep == 0)
-        return NULL;
-    if (!with)
-        with = "";
-    len_with = strlen(with);
-
-    ins = orig;
-    for (count = 0; (tmp = strstr(ins, rep)); ++count) {
-        ins = tmp + len_rep;
-    }
-
-    tmp = result = malloc(strlen(orig) + (len_with - len_rep) * count + 1);
-    if (!result)
-        return NULL;
-
-    while (count--) {
-        ins = strstr(orig, rep);
-        len_front = ins - orig;
-        tmp = strncpy(tmp, orig, len_front) + len_front;
-        tmp = strcpy(tmp, with) + len_with;
-        orig += len_front + len_rep;
-    }
-    strcpy(tmp, orig);
-    return result;
-}
-
-static void handle_write_out(const char *template, const nurl_http_response_t *res, const char *method, const char *url, double elapsed_sec) {
+static void handle_write_out(const char *template, const nurl_http_response_t *res, const char *method, const char *url, double elapsed_sec, const NurlOperationStats *stats) {
     if (!template) return;
 
-    char *result = strdup(template);
-    if (!result) return;
+    NurlBuf b;
+    nurl_buf_init(&b);
 
-    char http_code[16];
-    snprintf(http_code, sizeof(http_code), "%d", res->status_code);
-    char *temp = string_replace(result, "%{http_code}", http_code);
-    if (temp) { free(result); result = temp; }
-
-    char time_total[32];
-    snprintf(time_total, sizeof(time_total), "%.3f", elapsed_sec);
-    temp = string_replace(result, "%{time_total}", time_total);
-    if (temp) { free(result); result = temp; }
-
-    temp = string_replace(result, "%{time_connect}", "0.010");
-    if (temp) { free(result); result = temp; }
-
-    char size_download[32];
-    snprintf(size_download, sizeof(size_download), "%zu", res->body_len);
-    temp = string_replace(result, "%{size_download}", size_download);
-    if (temp) { free(result); result = temp; }
-
-    temp = string_replace(result, "%{url_effective}", url);
-    if (temp) { free(result); result = temp; }
-
-    const char *content_type = "";
-    for (size_t i = 0; i < res->header_count; i++) {
-        if (strncasecmp(res->headers[i], "Content-Type:", 13) == 0) {
-            content_type = res->headers[i] + 13;
-            while (*content_type && isspace((unsigned char)*content_type)) {
-                content_type++;
+    const char *p = template;
+    while (*p) {
+        if (*p == '%' && *(p + 1) == '{') {
+            const char *start = p + 2;
+            const char *end = strchr(start, '}');
+            if (end) {
+                size_t key_len = end - start;
+                if (strncmp(start, "http_code", key_len) == 0) {
+                    nurl_buf_printf(&b, "%d", res->status_code);
+                } else if (strncmp(start, "time_total", key_len) == 0) {
+                    nurl_buf_printf(&b, "%.3f", elapsed_sec);
+                } else if (strncmp(start, "time_connect", key_len) == 0) {
+                    nurl_buf_printf(&b, "%.3f", stats->connect_time_sec);
+                } else if (strncmp(start, "size_download", key_len) == 0) {
+                    nurl_buf_printf(&b, "%zu", res->body_len);
+                } else if (strncmp(start, "url_effective", key_len) == 0) {
+                    nurl_buf_append(&b, url, strlen(url));
+                } else if (strncmp(start, "num_redirects", key_len) == 0) {
+                    nurl_buf_printf(&b, "%d", stats->num_redirects);
+                } else if (strncmp(start, "method", key_len) == 0) {
+                    nurl_buf_append(&b, method, strlen(method));
+                } else if (strncmp(start, "content_type", key_len) == 0) {
+                    const char *content_type = "";
+                    for (size_t i = 0; i < res->header_count; i++) {
+                        if (nurl_strncasecmp(res->headers[i], "Content-Type:", 13) == 0) {
+                            content_type = res->headers[i] + 13;
+                            while (*content_type && isspace((unsigned char)*content_type)) content_type++;
+                            break;
+                        }
+                    }
+                    nurl_buf_append(&b, content_type, strlen(content_type));
+                } else if (strncmp(start, "scheme", key_len) == 0 || strncmp(start, "host", key_len) == 0) {
+                    char *scheme = NULL, *host = NULL, *path = NULL;
+                    int port = 0;
+                    nurl_utils_parse_url(url, &scheme, &host, &port, &path);
+                    if (strncmp(start, "scheme", key_len) == 0) nurl_buf_append(&b, scheme ? scheme : "", scheme ? strlen(scheme) : 0);
+                    else nurl_buf_append(&b, host ? host : "", host ? strlen(host) : 0);
+                    free(scheme); free(host); free(path);
+                } else {
+                    // Unknown variable, just append as is
+                    nurl_buf_append(&b, p, (size_t)(end - p + 1));
+                }
+                p = end + 1;
+                continue;
             }
-            break;
+        } else if (*p == '\\') {
+            if (*(p + 1) == 'n') { nurl_buf_append(&b, "\n", 1); p += 2; continue; }
+            else if (*(p + 1) == 't') { nurl_buf_append(&b, "\t", 1); p += 2; continue; }
         }
+        nurl_buf_append(&b, p, 1);
+        p++;
     }
-    temp = string_replace(result, "%{content_type}", content_type);
-    if (temp) { free(result); result = temp; }
 
-    temp = string_replace(result, "%{num_redirects}", "0");
-    if (temp) { free(result); result = temp; }
-
-    temp = string_replace(result, "%{method}", method);
-    if (temp) { free(result); result = temp; }
-
-    char *scheme = NULL;
-    char *host = NULL;
-    char *path = NULL;
-    int port = 0;
-    nurl_utils_parse_url(url, &scheme, &host, &port, &path);
-
-    temp = string_replace(result, "%{scheme}", scheme ? scheme : "");
-    if (temp) { free(result); result = temp; }
-
-    temp = string_replace(result, "%{host}", host ? host : "");
-    if (temp) { free(result); result = temp; }
-
-    free(scheme);
-    free(host);
-    free(path);
-
-    temp = string_replace(result, "\\n", "\n");
-    if (temp) { free(result); result = temp; }
-    temp = string_replace(result, "\\t", "\t");
-    if (temp) { free(result); result = temp; }
-
-    printf("%s", result);
-    free(result);
+    char *out = nurl_buf_take(&b);
+    printf("%s", out);
+    free(out);
 }
 
 #include "nurl_progress.h"
+#include "nurl_dispatch.h"
 
 int nurl_request_generic(const char *method, const char *url, const CommonArgs *common) {
     double start_time = nurl_utils_get_time_sec();
 
     nurl_http_response_t *res = NULL;
     char *effective_url = NULL;
+    NurlOperationStats stats = {0};
 
     NurlRequest *req = nurl_request_new();
     if (!req) return NURL_ERR_OOM;
@@ -135,49 +94,13 @@ int nurl_request_generic(const char *method, const char *url, const CommonArgs *
     if (common->progress) {
         p_ctx.resume_offset = 0;
         p_ctx.silent = common->silent;
-        gettimeofday(&p_ctx.start_time, NULL);
+        p_ctx.start_time = nurl_utils_get_time_sec();
         p_ctx.last_update = p_ctx.start_time;
         req->progress_cb = nurl_progress_update;
         req->progress_data = &p_ctx;
     }
 
-    unsigned int max_retries = common->retry;
-    unsigned long delay_sec = common->retry_delay > 0 ? common->retry_delay : 1;
-    int engine_err = NURL_OK;
-
-    for (unsigned int attempt = 0; attempt <= max_retries; attempt++) {
-        if (res) {
-            nurl_http_response_free(res);
-            res = NULL;
-        }
-        if (effective_url) {
-            free(effective_url);
-            effective_url = NULL;
-        }
-
-        engine_err = nurl_engine_execute_request(req, &res, &effective_url);
-
-        if (engine_err == NURL_OK && res) {
-            if (res->status_code < 500) {
-                // Success, break out of retry loop
-                break;
-            } else {
-                // 5xx error, retry
-                if (attempt < max_retries && !common->silent) {
-                    fprintf(stderr, "nurl: Warning: HTTP %d. Retrying in %lu seconds...\n", res->status_code, delay_sec);
-                }
-            }
-        } else {
-            // Network failure, retry
-            if (attempt < max_retries && !common->silent) {
-                fprintf(stderr, "nurl: Warning: Request failed (error %d). Retrying in %lu seconds...\n", engine_err, delay_sec);
-            }
-        }
-
-        if (attempt < max_retries) {
-            sleep(delay_sec);
-        }
-    }
+    int engine_err = execute_with_retry(req, common, &res, &effective_url, &stats);
 
     if (engine_err != NURL_OK) {
         if (!common->silent) {
@@ -209,26 +132,18 @@ int nurl_request_generic(const char *method, const char *url, const CommonArgs *
 
         if (common->output) {
             bool is_stdout = (strcmp(common->output, "-") == 0);
-            FILE *f = NULL;
-            if (is_stdout) {
-                f = stdout;
-            } else {
-                f = fopen(common->output, "wb");
-            }
+            FILE *f = is_stdout ? stdout : fopen(common->output, "wb");
             if (!f) {
                 fprintf(stderr, "nurl: (6) Could not open file for writing: %s\n", common->output);
                 nurl_http_response_free(res);
                 free(effective_url);
-                return NURL_ERR_WRITE;
+                return NURL_ERR_IO;
             }
             if (res->body_len > 0) {
                 fwrite(res->body, 1, res->body_len, f);
             }
-            if (!is_stdout) {
-                fclose(f);
-            } else {
-                fflush(f);
-            }
+            if (!is_stdout) fclose(f);
+            else fflush(f);
         } else {
             if (res->body_len > 0) {
                 fwrite(res->body, 1, res->body_len, stdout);
@@ -239,19 +154,17 @@ int nurl_request_generic(const char *method, const char *url, const CommonArgs *
     double elapsed_sec = nurl_utils_get_time_sec() - start_time;
 
     if (common->write_out && !should_suppress_output) {
-        handle_write_out(common->write_out, res, method, effective_url ? effective_url : url, elapsed_sec);
+        handle_write_out(common->write_out, res, method, effective_url ? effective_url : url, elapsed_sec, &stats);
     }
 
     int ret_code = NURL_OK;
     if (res->status_code >= 500) {
-        ret_code = NURL_ERR_STATUS_5XX;
+        ret_code = NURL_ERR_HTTP_5XX;
     } else if (res->status_code >= 400) {
-        ret_code = NURL_ERR_STATUS_4XX;
+        ret_code = NURL_ERR_HTTP_4XX;
     }
 
     nurl_http_response_free(res);
-    if (effective_url) {
-        free(effective_url);
-    }
+    if (effective_url) free(effective_url);
     return ret_code;
 }

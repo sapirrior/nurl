@@ -2,6 +2,7 @@
 #define NURL_HTTP_H
 
 #include "net/nurl_stream.h"
+#include "engine/request.h"
 #include <stddef.h>
 
 typedef struct {
@@ -26,25 +27,27 @@ typedef struct {
  * Returns NURL_OK on success, or an explicit nurl_err_t on failure.
  * If successful, *out_response will contain the dynamically allocated response.
  */
-#include "engine/request.h"
 #include <stdio.h>
+#include <stdint.h>
+
+typedef struct {
+    const char        *method;
+    const char        *path;
+    const char        *hostname;
+    const char        *extra_headers;
+    const uint8_t     *body;
+    size_t             body_len;
+    NurlBodyPart      *body_parts;
+    size_t             body_parts_count;
+    FILE              *body_out;
+    unsigned long      resume_offset;
+    nurl_progress_cb   progress_cb;
+    void              *progress_data;
+} NurlHttpParams;
 
 nurl_err_t nurl_http_request(
     NurlStream *stream,
-    const char *method,
-    const char *path,
-    const char *hostname,
-    const char *extra_headers,
-    const unsigned char *body,
-    size_t body_len,
-    NurlBodyPart *body_parts,
-    size_t body_parts_count,
-    FILE *body_out,
-    bool show_progress,
-    bool silent,
-    unsigned long resume_offset,
-    nurl_progress_cb progress_cb,
-    void *progress_data,
+    const NurlHttpParams *p,
     nurl_http_response_t **out_response
 );
 

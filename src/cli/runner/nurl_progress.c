@@ -1,16 +1,15 @@
 #include "nurl_progress.h"
+#include "utils/nurl_utils.h"
 #include <stdio.h>
-#include <sys/time.h>
 
 void nurl_progress_update(unsigned long downloaded, unsigned long total, bool finished, void *user_data) {
     NurlProgressCtx *ctx = (NurlProgressCtx *)user_data;
     if (!ctx || ctx->silent) return;
 
-    struct timeval now;
-    gettimeofday(&now, NULL);
+    double now = nurl_utils_get_time_sec();
 
-    double elapsed_sec = (now.tv_sec - ctx->start_time.tv_sec) + (now.tv_usec - ctx->start_time.tv_usec) / 1000000.0;
-    double since_last_sec = (now.tv_sec - ctx->last_update.tv_sec) + (now.tv_usec - ctx->last_update.tv_usec) / 1000000.0;
+    double elapsed_sec = now - ctx->start_time;
+    double since_last_sec = now - ctx->last_update;
 
     // Throttle updates to 5 times per second, unless it's the final update
     if (finished || since_last_sec >= 0.2 || (total > 0 && downloaded == total)) {

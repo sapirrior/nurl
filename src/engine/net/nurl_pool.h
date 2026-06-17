@@ -11,6 +11,7 @@
 typedef struct {
     char         host[256];
     int          port;
+    bool         is_tls;
     NurlStream  *stream;
     bool         in_use;
     time_t       last_used;   /* for idle eviction */
@@ -26,7 +27,7 @@ void           nurl_pool_destroy(NurlConnPool *pool);
 /* Acquire a cached connection or open a new one.
  * Returns NURL_OK on success; *stream is populated. */
 nurl_err_t     nurl_pool_acquire(NurlConnPool *pool,
-                   const char *host, int port,
+                   const char *host, int port, bool is_tls,
                    const NurlRequest *req,
                    NurlStream **stream);
 

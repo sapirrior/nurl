@@ -19,13 +19,6 @@ typedef enum {
     NURL_ERR_GENERIC   = 99,
 } nurl_err_t;
 
-/* Backward compatibility aliases */
-#define NURL_ERR_INVALID_URL NURL_ERR_URL
-#define NURL_ERR_BAD_ARGS    NURL_ERR_ARG
-#define NURL_ERR_WRITE       NURL_ERR_IO
-#define NURL_ERR_STATUS_4XX  NURL_ERR_HTTP_4XX
-#define NURL_ERR_STATUS_5XX  NURL_ERR_HTTP_5XX
-
 /* Emit a formatted error to stderr and return the code */
 nurl_err_t nurl_err(nurl_err_t code, const char *fmt, ...);
 

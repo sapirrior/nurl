@@ -2,12 +2,12 @@
 #define NURL_PROGRESS_H
 
 #include "engine/request.h"
-#include <sys/time.h>
+#include <stdbool.h>
 
 typedef struct {
     unsigned long resume_offset;
-    struct timeval start_time;
-    struct timeval last_update;
+    double start_time;
+    double last_update;
     bool silent;
 } NurlProgressCtx;
 

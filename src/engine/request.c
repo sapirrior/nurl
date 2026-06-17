@@ -1,4 +1,5 @@
 #include "request.h"
+#include "nurl_request_build.h"
 #include <stdlib.h>
 #include <string.h>
 

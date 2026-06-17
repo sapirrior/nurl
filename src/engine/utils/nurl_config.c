@@ -1,5 +1,6 @@
 #include "nurl_config.h"
 #include "nurl_utils.h"
+#include "compat/nurl_compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,6 +15,16 @@ static void strip_quotes(char *str) {
     }
 }
 
+static bool has_header(char **headers, size_t count, const char *key) {
+    size_t key_len = strlen(key);
+    for (size_t i = 0; i < count; i++) {
+        if (nurl_strncasecmp(headers[i], key, key_len) == 0 && headers[i][key_len] == ':') {
+            return true;
+        }
+    }
+    return false;
+}
+
 void nurl_config_load_and_merge(CommonArgs *args) {
     char *config_path = getenv("NURL_CONFIG");
     char *allocated_path = NULL;
@@ -21,8 +32,12 @@ void nurl_config_load_and_merge(CommonArgs *args) {
     if (!config_path) {
         char *home = getenv("HOME");
         if (home) {
-            asprintf(&allocated_path, "%s/.config/nurl/config.toml", home);
-            config_path = allocated_path;
+            size_t needed = strlen(home) + 32;
+            allocated_path = malloc(needed);
+            if (allocated_path) {
+                snprintf(allocated_path, needed, "%s/.config/nurl/config.toml", home);
+                config_path = allocated_path;
+            }
         }
     }
 
@@ -42,9 +57,9 @@ void nurl_config_load_and_merge(CommonArgs *args) {
         }
 
         if (trimmed[0] == '[') {
-            if (strcasecmp(trimmed, "[defaults]") == 0) {
+            if (nurl_strcasecmp(trimmed, "[defaults]") == 0) {
                 section = 1;
-            } else if (strcasecmp(trimmed, "[headers]") == 0) {
+            } else if (nurl_strcasecmp(trimmed, "[headers]") == 0) {
                 section = 2;
             } else {
                 section = 0;
@@ -61,22 +76,24 @@ void nurl_config_load_and_merge(CommonArgs *args) {
 
             if (section == 1) {
                 // [defaults]
-                if (strcasecmp(key, "timeout") == 0 && args->timeout == 30) {
+                if (nurl_strcasecmp(key, "timeout") == 0 && args->timeout == 30) {
                     args->timeout = strtoul(val, NULL, 10);
-                } else if (strcasecmp(key, "connect_timeout") == 0 && args->connect_timeout == 10) {
+                } else if (nurl_strcasecmp(key, "connect_timeout") == 0 && args->connect_timeout == 10) {
                     args->connect_timeout = strtoul(val, NULL, 10);
-                } else if (strcasecmp(key, "follow_redirects") == 0 && !args->location) {
-                    if (strcasecmp(val, "true") == 0) {
+                } else if (nurl_strcasecmp(key, "follow_redirects") == 0 && !args->location) {
+                    if (nurl_strcasecmp(val, "true") == 0) {
                         args->location = true;
                     }
-                } else if (strcasecmp(key, "user_agent") == 0 && !args->user_agent) {
+                } else if (nurl_strcasecmp(key, "user_agent") == 0 && !args->user_agent) {
                     args->user_agent = strdup(val);
                 }
             } else if (section == 2) {
                 // [headers]
-                if (!nurl_utils_has_header(args->header, args->header_count, key)) {
-                    char *hdr_line = NULL;
-                    if (asprintf(&hdr_line, "%s: %s", key, val) >= 0) {
+                if (!has_header(args->header, args->header_count, key)) {
+                    size_t needed = strlen(key) + strlen(val) + 4;
+                    char *hdr_line = malloc(needed);
+                    if (hdr_line) {
+                        snprintf(hdr_line, needed, "%s: %s", key, val);
                         char **temp = realloc(args->header, sizeof(char *) * (args->header_count + 1));
                         if (temp) {
                             args->header = temp;

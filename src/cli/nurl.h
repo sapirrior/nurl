@@ -35,6 +35,10 @@ typedef struct {
 
     // Request Control
     char *method;
+    bool download;
+    bool ping;
+    bool resolve;
+    bool dry_run;
     unsigned long timeout;
     unsigned long connect_timeout;
     bool location;

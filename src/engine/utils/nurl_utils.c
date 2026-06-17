@@ -1,4 +1,5 @@
 #include "nurl_utils.h"
+#include "compat/nurl_compat.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -98,7 +99,7 @@ int nurl_utils_parse_url(const char *url, char **scheme, char **host, int *port,
 
 const char *nurl_utils_redact_header(const char *key, const char *value) {
     if (!key) return value;
-    if (strcasecmp(key, "authorization") == 0 || strcasecmp(key, "cookie") == 0) {
+    if (nurl_strcasecmp(key, "authorization") == 0 || nurl_strcasecmp(key, "cookie") == 0) {
         return "[hidden]";
     }
     return value;
@@ -156,34 +157,6 @@ double nurl_utils_get_time_sec(void) {
     gettimeofday(&tv, NULL);
     return (double)tv.tv_sec + (double)tv.tv_usec / 1000000.0;
 #endif
-}
-
-bool nurl_utils_append_hdr_str(char **buf, size_t *len, size_t *cap, const char *fmt, const char *val) {
-    size_t needed = strlen(fmt) + (val ? strlen(val) : 0) + 16;
-    if (*len + needed >= *cap) {
-        *cap = (*cap + needed) * 2;
-        char *temp = realloc(*buf, *cap);
-        if (!temp) {
-            return false;
-        }
-        *buf = temp;
-    }
-    int written = snprintf(*buf + *len, *cap - *len, fmt, val);
-    if (written < 0) {
-        return false;
-    }
-    *len += written;
-    return true;
-}
-
-bool nurl_utils_has_header(char **headers, size_t count, const char *key) {
-    size_t key_len = strlen(key);
-    for (size_t i = 0; i < count; i++) {
-        if (strncasecmp(headers[i], key, key_len) == 0 && headers[i][key_len] == ':') {
-            return true;
-        }
-    }
-    return false;
 }
 
 char *nurl_utils_read_stdin(size_t *out_len) {

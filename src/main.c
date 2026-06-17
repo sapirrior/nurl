@@ -4,7 +4,7 @@
 #include <ctype.h>
 #include "nurl.h"
 #include "nurl_cli.h"
-#include "nurl_runner.h"
+#include "nurl_dispatch.h"
 #include "nurl_config.h"
 #include "nurl_net.h"
 #include "nurl_utils.h"
@@ -20,28 +20,16 @@
 static void print_help(const char *prog_name) {
     printf("NetworkURL (nurl) — A clean, fast, and structured HTTP client CLI\n\n");
     printf("Usage:\n");
-    printf("  %s [command] <URL> [options]\n\n", prog_name);
-    printf("Commands:\n");
-    printf("  get               Send a GET request to a URL (default)\n");
-    printf("  post              Send a POST request to a URL\n");
-    printf("  put               Send a PUT request to a URL\n");
-    printf("  delete            Send a DELETE request to a URL\n");
-    printf("  head              Fetch HTTP headers from a URL\n");
-    printf("  patch             Send a PATCH request to a URL\n");
-    printf("  options           Show Allow and Access-Control headers\n");
-    printf("  download          Stream a file download to disk\n");
-    printf("  upload            Upload a file as multipart/form-data\n");
-    printf("  inspect           Inspect the request headers and body without sending\n");
-    printf("  ping              Ping a URL to measure latency\n");
-    printf("  resolve           Resolve host DNS records\n\n");
+    printf("  %s <URL> [options]\n\n", prog_name);
     printf("Options:\n");
+    printf("  -X, --method <val>    HTTP method (default: GET)\n");
+    printf("  -d, --data <val>      HTTP request body payload\n");
+    printf("  -j, --json            Shorthand: sets Content-Type to application/json\n");
     printf("  -u, --user <val>      Basic auth credentials (username:password)\n");
     printf("  --bearer <val>        Bearer token authorization\n");
     printf("  --token <val>         API token authorization\n");
     printf("  --no-auth             Strip any Authorization headers\n");
-    printf("  -d, --data <val>      HTTP POST/PUT request body payload\n");
-    printf("  -j, --json            Shorthand: sets Content-Type to application/json\n");
-    printf("  -k, --no-verify       Skip TLS/SSL certificate verification\n");
+    printf("  -k, --insecure        Skip TLS/SSL certificate verification\n");
     printf("  --cacert <file>       CA certificate PEM bundle path\n");
     printf("  --cert <file>         TLS client certificate PEM file\n");
     printf("  --key <file>          TLS private key file\n");
@@ -50,24 +38,46 @@ static void print_help(const char *prog_name) {
     printf("  --no-proxy <val>      Comma-separated list of hosts to bypass proxy for\n");
     printf("  -t, --timeout <sec>   Maximum data transfer timeout in seconds (default: 30)\n");
     printf("  --connect-timeout <sec> Maximum connection handshake timeout (default: 10)\n");
-    printf("  -L, --location        Follow HTTP 3xx redirections\n");
+    printf("  -L, --follow          Follow HTTP 3xx redirections\n");
     printf("  -H, --header <val>    Pass custom header line (e.g. \"X-Custom: value\")\n");
     printf("  -o, --output <file>   Save response body to local file\n");
+    printf("  -w, --format <str>    Custom output format (e.g. \"%%{http_code}\")\n");
+    printf("  -D, --download        Stream a file download to disk\n");
+    printf("  --upload <file>       Upload a file as multipart/form-data\n");
+    printf("  --mime <type>         MIME type for upload\n");
+    printf("  --name <val>          Form field name for upload\n");
+    printf("  --field <key=val>     Add a multipart form field\n");
+    printf("  -b, --cookie <val>    Send cookies from string or file (@file)\n");
+    printf("  -c, --cookie-jar <file> Write cookies to file after request\n");
+    printf("  --session <file>      Read/write cookies for a session\n");
+    printf("  --resume              Resume a partial download\n");
+    printf("  --progress            Show progress meter during transfer\n");
+    printf("  --dry-run             Inspect the request headers and body without sending\n");
+    printf("  --ping                Ping a URL to measure latency\n");
+    printf("  --count <num>         Number of pings to send\n");
+    printf("  --interval <ms>       Delay between pings in milliseconds\n");
+    printf("  --resolve             Resolve host DNS records\n");
     printf("  -i, --include         Include response headers in the output\n");
     printf("  -v, --verbose         Print verbose logs with request (> ) and response (< ) details\n");
     printf("  -s, --silent          Suppress all output logging\n");
     printf("  --raw                 Print raw, unformatted JSON responses\n");
-    printf("  --compressed          Request compressed response and decompress automatically\n");
+    printf("  --gzip                Request compressed response and decompress automatically\n");
     printf("  -e, --referer <val>   Referer URL header value\n");
     printf("  -f, --fail            Fail silently on server errors (return non-zero on 4xx/5xx)\n");
     printf("  --retry <num>         Number of retries on network/5xx transient errors\n");
     printf("  --retry-delay <sec>   Delay between retries in seconds (default: 1)\n");
     printf("  --tls1.2              Enforce TLS v1.2 protocol\n");
     printf("  --tls1.3              Enforce TLS v1.3 protocol\n");
+    printf("  -V, --version         Print version information\n");
     printf("  -h, --help            Print this help dialogue\n");
 }
 
+#include <signal.h>
+
 int main(int argc, char **argv) {
+#ifndef _WIN32
+    signal(SIGPIPE, SIG_IGN);
+#endif
     if (nurl_net_init() != 0) {
         fprintf(stderr, "Error: Network initialization failed.\n");
         return 1;
@@ -91,8 +101,7 @@ int main(int argc, char **argv) {
     // Load and merge default configurations
     nurl_config_load_and_merge(&args);
 
-    // Convert command to uppercase to match standard HTTP verbs
-    char *method = strdup(command);
+    char *method = args.method ? strdup(args.method) : strdup("GET");
     for (size_t i = 0; i < strlen(method); i++) {
         method[i] = (char)toupper((unsigned char)method[i]);
     }
@@ -110,7 +119,7 @@ int main(int argc, char **argv) {
         }
     }
 
-    int result = nurl_runner_execute(method, url, &args);
+    int result = nurl_dispatch(method, url, &args);
 
     free(method);
     free(command);

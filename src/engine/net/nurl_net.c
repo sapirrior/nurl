@@ -1,5 +1,6 @@
 #include "nurl_net.h"
 #include "nurl_utils.h"
+#include "compat/nurl_compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,30 +10,28 @@
   #include <winsock2.h>
   #include <ws2tcpip.h>
   #define socket_close(fd) closesocket(fd)
-  #define socket_write(fd, buf, len) send(fd, (const char *)(buf), (int)(len), 0)
   #define socket_read(fd, buf, len) recv(fd, (char *)(buf), (int)(len), 0)
+  #define socket_write(fd, buf, len) send(fd, (const char *)(buf), (int)(len), 0)
 #else
   #include <unistd.h>
-  #include <sys/types.h>
   #include <sys/socket.h>
-  #include <sys/time.h>
+  #include <netinet/in.h>
   #include <netdb.h>
-  #include <poll.h>
-  #include <errno.h>
   #include <fcntl.h>
+  #include <errno.h>
+  #include <poll.h>
   #define socket_close(fd) close(fd)
-  #define socket_write(fd, buf, len) write(fd, buf, len)
   #define socket_read(fd, buf, len) read(fd, buf, len)
+  #define socket_write(fd, buf, len) write(fd, buf, len)
 #endif
 
 int nurl_net_init(void) {
 #ifdef _WIN32
     WSADATA wsaData;
-    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-        return -1;
-    }
-#endif
+    return WSAStartup(MAKEWORD(2, 2), &wsaData);
+#else
     return 0;
+#endif
 }
 
 void nurl_net_cleanup(void) {
@@ -41,183 +40,111 @@ void nurl_net_cleanup(void) {
 #endif
 }
 
-int nurl_net_connect(const char *hostname, int port) {
-    return nurl_net_connect_ex(hostname, port, 10, NULL);
-}
-
 int nurl_net_connect_ex(const char *hostname, int port, unsigned int connect_timeout_sec, nurl_err_t *out_err) {
     char port_str[16];
     snprintf(port_str, sizeof(port_str), "%d", port);
 
     struct addrinfo hints;
     struct addrinfo *result, *rp;
-
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;     /* Allow IPv4 or IPv6 */
-    hints.ai_socktype = SOCK_STREAM; /* TCP socket */
-    hints.ai_flags = 0;
-    hints.ai_protocol = 0;           /* Any protocol */
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
 
-    int s = getaddrinfo(hostname, port_str, &hints, &result);
-    if (s != 0) {
+    if (getaddrinfo(hostname, port_str, &hints, &result) != 0) {
         if (out_err) *out_err = NURL_ERR_RESOLVE;
         return -1;
     }
 
     int socket_fd = -1;
-    nurl_err_t last_err = NURL_ERR_CONNECT;
-
     for (rp = result; rp != NULL; rp = rp->ai_next) {
-#ifdef _WIN32
         socket_fd = (int)socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-#else
-        socket_fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-#endif
-        if (socket_fd == -1) {
-            continue;
+        if (socket_fd == -1) continue;
+
+#ifndef _WIN32
+        if (connect_timeout_sec > 0) {
+            int flags = fcntl(socket_fd, F_GETFL, 0);
+            fcntl(socket_fd, F_SETFL, flags | O_NONBLOCK);
+
+            if (connect(socket_fd, rp->ai_addr, rp->ai_addrlen) == -1) {
+                if (errno != EINPROGRESS) {
+                    socket_close(socket_fd);
+                    socket_fd = -1;
+                    continue;
+                }
+
+                struct pollfd pfd;
+                pfd.fd = socket_fd;
+                pfd.events = POLLOUT;
+                int res = poll(&pfd, 1, (int)(connect_timeout_sec * 1000));
+                if (res <= 0) {
+                    socket_close(socket_fd);
+                    socket_fd = -1;
+                    continue;
+                }
+
+                int err;
+                socklen_t len = sizeof(err);
+                if (getsockopt(socket_fd, SOL_SOCKET, SO_ERROR, &err, &len) < 0 || err != 0) {
+                    socket_close(socket_fd);
+                    socket_fd = -1;
+                    continue;
+                }
+            }
+            fcntl(socket_fd, F_SETFL, flags);
+            break; /* Success */
+        } else {
+            if (connect(socket_fd, rp->ai_addr, rp->ai_addrlen) != -1) break;
         }
-
-        /* Set non-blocking */
-#ifdef _WIN32
-        unsigned long mode = 1;
-        ioctlsocket((SOCKET)socket_fd, FIONBIO, &mode);
 #else
-        int flags = fcntl(socket_fd, F_GETFL, 0);
-        fcntl(socket_fd, F_SETFL, flags | O_NONBLOCK);
+        if (connect(socket_fd, rp->ai_addr, (int)rp->ai_addrlen) != -1) break;
 #endif
-
-        int res = connect(socket_fd, rp->ai_addr, rp->ai_addrlen);
-        if (res == -1) {
-#ifdef _WIN32
-            int err = WSAGetLastError();
-            if (err != WSAEWOULDBLOCK) {
-#else
-            if (errno != EINPROGRESS) {
-#endif
-                socket_close(socket_fd);
-                socket_fd = -1;
-                continue;
-            }
-
-            /* Wait for connection */
-#ifdef _WIN32
-            WSAPOLLFD pfd;
-            pfd.fd = (SOCKET)socket_fd;
-            pfd.events = POLLOUT;
-            int poll_res = WSAPoll(&pfd, 1, connect_timeout_sec * 1000);
-#else
-            struct pollfd pfd;
-            pfd.fd = socket_fd;
-            pfd.events = POLLOUT;
-            int poll_res = poll(&pfd, 1, connect_timeout_sec * 1000);
-#endif
-
-            if (poll_res <= 0) {
-                if (poll_res == 0) last_err = NURL_ERR_TIMEOUT;
-                socket_close(socket_fd);
-                socket_fd = -1;
-                continue;
-            }
-
-            /* Check for errors */
-            int optval;
-            socklen_t optlen = sizeof(optval);
-            if (getsockopt(socket_fd, SOL_SOCKET, SO_ERROR, (void *)&optval, &optlen) < 0 || optval != 0) {
-                socket_close(socket_fd);
-                socket_fd = -1;
-                continue;
-            }
-        }
-
-        /* Set back to blocking */
-#ifdef _WIN32
-        mode = 0;
-        ioctlsocket((SOCKET)socket_fd, FIONBIO, &mode);
-#else
-        fcntl(socket_fd, F_SETFL, flags);
-#endif
-
-        last_err = NURL_OK;
-        break; /* Connected successfully */
+        socket_close(socket_fd);
+        socket_fd = -1;
     }
 
     freeaddrinfo(result);
-    if (socket_fd == -1 && out_err) *out_err = last_err;
+    if (socket_fd == -1) {
+        if (out_err) *out_err = NURL_ERR_CONNECT;
+        return -1;
+    }
+
     return socket_fd;
 }
 
-void nurl_net_close(int socket_fd) {
-    if (socket_fd >= 0) {
-        socket_close(socket_fd);
-    }
-}
-
 int nurl_net_set_timeout(int socket_fd, unsigned long seconds) {
-    if (socket_fd < 0 || seconds == 0) {
-        return 0;
-    }
 #ifdef _WIN32
-    DWORD tv = (DWORD)(seconds * 1000);
-    if (setsockopt((SOCKET)socket_fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(tv)) < 0) {
-        return -1;
-    }
-    if (setsockopt((SOCKET)socket_fd, SOL_SOCKET, SO_SNDTIMEO, (const char *)&tv, sizeof(tv)) < 0) {
-        return -1;
-    }
+    DWORD timeout = (DWORD)(seconds * 1000);
+    setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+    setsockopt(socket_fd, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
 #else
     struct timeval tv;
-    tv.tv_sec = (time_t)seconds;
+    tv.tv_sec = seconds;
     tv.tv_usec = 0;
-    if (setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
-        return -1;
-    }
-    if (setsockopt(socket_fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) < 0) {
-        return -1;
-    }
+    setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(socket_fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 #endif
     return 0;
 }
 
 bool nurl_net_is_alive(int socket_fd) {
-    if (socket_fd < 0) return false;
-
+    char buf;
 #ifdef _WIN32
-    WSAPOLLFD pfd;
-    pfd.fd = (SOCKET)socket_fd;
-    pfd.events = POLLIN;
-    if (WSAPoll(&pfd, 1, 0) > 0) {
-        if (pfd.revents & (POLLHUP | POLLERR | POLLNVAL)) return false;
-        if (pfd.revents & POLLIN) {
-            char buf;
-            int r = recv((SOCKET)socket_fd, &buf, 1, MSG_PEEK);
-            if (r <= 0) return false;
-        }
+    int res = recv(socket_fd, &buf, 1, MSG_PEEK);
+    if (res == 0) return false;
+    if (res < 0) {
+        int err = WSAGetLastError();
+        if (err != WSAEWOULDBLOCK) return false;
     }
 #else
-    struct pollfd pfd;
-    pfd.fd = socket_fd;
-    pfd.events = POLLIN;
-    int ret = poll(&pfd, 1, 0);
-    if (ret > 0) {
-        if (pfd.revents & (POLLHUP | POLLERR | POLLNVAL)) return false;
-        if (pfd.revents & POLLIN) {
-            char buf;
-            ssize_t r = recv(socket_fd, &buf, 1, MSG_PEEK | MSG_DONTWAIT);
-            if (r == 0) return false;
-            if (r < 0 && errno != EAGAIN && errno != EWOULDBLOCK) return false;
-        }
-    } else if (ret < 0) {
-        return false;
-    }
+    int res = (int)recv(socket_fd, &buf, 1, MSG_PEEK | MSG_DONTWAIT);
+    if (res == 0) return false;
+    if (res < 0 && errno != EAGAIN && errno != EWOULDBLOCK) return false;
 #endif
     return true;
 }
 
-int nurl_net_connect_proxy(
-    const char *host, int port,
-    const char *proxy, const char *proxy_user, const char *no_proxy
-) {
-    return nurl_net_connect_proxy_ex(host, port, proxy, proxy_user, no_proxy, 10, NULL);
+void nurl_net_close(int socket_fd) {
+    socket_close(socket_fd);
 }
 
 int nurl_net_connect_proxy_ex(
@@ -226,45 +153,32 @@ int nurl_net_connect_proxy_ex(
     unsigned int connect_timeout_sec,
     nurl_err_t *out_err
 ) {
-    bool use_proxy = false;
-    if (proxy && strlen(proxy) > 0) {
-        use_proxy = true;
-        if (no_proxy && strlen(no_proxy) > 0) {
-            char *no_proxy_copy = strdup(no_proxy);
-            if (no_proxy_copy) {
-                char *tok = strtok(no_proxy_copy, ",");
-                while (tok) {
-                    char *trimmed = tok;
-                    while (*trimmed && isspace((unsigned char)*trimmed)) {
-                        trimmed++;
+    bool use_proxy = (proxy != NULL);
+    if (use_proxy && no_proxy) {
+        char *np_copy = strdup(no_proxy);
+        if (np_copy) {
+            char *trimmed_np = nurl_utils_trim(np_copy);
+            char *tok = trimmed_np;
+            while (tok) {
+                char *comma = strchr(tok, ',');
+                if (comma) *comma = '\0';
+                char *item = nurl_utils_trim(tok);
+                if (item) {
+                    size_t hlen = strlen(host);
+                    size_t ilen = strlen(item);
+                    if (nurl_strcasecmp(host, item) == 0) {
+                        use_proxy = false;
+                        break;
                     }
-                    // Trim trailing spaces
-                    size_t len = strlen(trimmed);
-                    while (len > 0 && isspace((unsigned char)trimmed[len - 1])) {
-                        len--;
+                    if (item[0] == '.' && hlen > ilen && nurl_strcasecmp(host + hlen - ilen, item) == 0) {
+                        use_proxy = false;
+                        break;
                     }
-                    if (len > 0) {
-                        char *item = strndup(trimmed, len);
-                        if (item) {
-                            size_t hlen = strlen(host);
-                            size_t ilen = strlen(item);
-                            if (strcasecmp(host, item) == 0) {
-                                use_proxy = false;
-                                free(item);
-                                break;
-                            }
-                            if (item[0] == '.' && hlen > ilen && strcasecmp(host + hlen - ilen, item) == 0) {
-                                use_proxy = false;
-                                free(item);
-                                break;
-                            }
-                            free(item);
-                        }
-                    }
-                    tok = strtok(NULL, ",");
                 }
-                free(no_proxy_copy);
+                if (comma) tok = comma + 1;
+                else tok = NULL;
             }
+            free(np_copy);
         }
     }
 
@@ -272,80 +186,38 @@ int nurl_net_connect_proxy_ex(
         return nurl_net_connect_ex(host, port, connect_timeout_sec, out_err);
     }
 
-    // Parse proxy string
-    char *proxy_host = NULL;
-    int proxy_port = 8080;
-
-    // Use nurl_utils_parse_url for proxy parsing
-    char *proxy_scheme = NULL;
-    char *proxy_path = NULL;
+    char *proxy_scheme = NULL, *proxy_host = NULL, *proxy_path = NULL;
+    int proxy_port = 0;
     if (nurl_utils_parse_url(proxy, &proxy_scheme, &proxy_host, &proxy_port, &proxy_path) != 0) {
-        // Fallback: raw host:port
-        char *colon = strchr(proxy, ':');
-        if (colon) {
-            proxy_host = strndup(proxy, colon - proxy);
-            proxy_port = atoi(colon + 1);
-        } else {
-            proxy_host = strdup(proxy);
-            proxy_port = 8080;
-        }
+        if (out_err) *out_err = NURL_ERR_URL;
+        return -1;
     }
     free(proxy_scheme);
     free(proxy_path);
 
     if (!proxy_host) {
-        if (out_err) *out_err = NURL_ERR_INVALID_URL;
+        if (out_err) *out_err = NURL_ERR_URL;
         return -1;
     }
 
     int socket_fd = nurl_net_connect_ex(proxy_host, proxy_port, connect_timeout_sec, out_err);
     free(proxy_host);
 
-    if (socket_fd < 0) {
-        // out_err already set by nurl_net_connect_ex
-        return -1;
-    }
+    if (socket_fd < 0) return -1;
 
-    // Set a temporary timeout for proxy handshake
-#ifdef _WIN32
-    DWORD tv = 10000;
-    setsockopt((SOCKET)socket_fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv, sizeof(tv));
-    setsockopt((SOCKET)socket_fd, SOL_SOCKET, SO_SNDTIMEO, (const char *)&tv, sizeof(tv));
-#else
-    struct timeval tv;
-    tv.tv_sec = 10;
-    tv.tv_usec = 0;
-    setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    setsockopt(socket_fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-#endif
-
-    // Send CONNECT request
+    // HTTP CONNECT Tunneling
     char connect_req[2048];
-    int req_len = 0;
-    if (proxy_user && strlen(proxy_user) > 0) {
+    int req_len = snprintf(connect_req, sizeof(connect_req), "CONNECT %s:%d HTTP/1.1\r\nHost: %s:%d\r\n", host, port, host, port);
+
+    if (proxy_user) {
         char *auth_b64 = nurl_utils_base64_encode((const unsigned char *)proxy_user, strlen(proxy_user));
         if (auth_b64) {
-            req_len = snprintf(connect_req, sizeof(connect_req),
-                "CONNECT %s:%d HTTP/1.1\r\n"
-                "Host: %s:%d\r\n"
-                "Proxy-Authorization: Basic %s\r\n"
-                "\r\n",
-                host, port, host, port, auth_b64);
+            req_len += snprintf(connect_req + req_len, sizeof(connect_req) - req_len, "Proxy-Authorization: Basic %s\r\n", auth_b64);
             free(auth_b64);
-        } else {
-            req_len = snprintf(connect_req, sizeof(connect_req),
-                "CONNECT %s:%d HTTP/1.1\r\n"
-                "Host: %s:%d\r\n"
-                "\r\n",
-                host, port, host, port);
         }
-    } else {
-        req_len = snprintf(connect_req, sizeof(connect_req),
-            "CONNECT %s:%d HTTP/1.1\r\n"
-            "Host: %s:%d\r\n"
-            "\r\n",
-            host, port, host, port);
     }
+
+    req_len += snprintf(connect_req + req_len, sizeof(connect_req) - req_len, "\r\n");
 
     if (socket_write(socket_fd, connect_req, req_len) <= 0) {
         if (out_err) *out_err = NURL_ERR_NETWORK;
@@ -353,38 +225,25 @@ int nurl_net_connect_proxy_ex(
         return -1;
     }
 
-    // Read Response Header
-    char resp_buf[1024];
+    // Read Response Header (buffered)
+    char resp_buf[4096];
     int resp_len = 0;
     while (resp_len < (int)sizeof(resp_buf) - 1) {
-        int n = socket_read(socket_fd, resp_buf + resp_len, 1);
+        int n = socket_read(socket_fd, resp_buf + resp_len, sizeof(resp_buf) - resp_len - 1);
         if (n <= 0) break;
-        resp_len++;
+        resp_len += n;
         resp_buf[resp_len] = '\0';
-        if (resp_len >= 4 && strcmp(resp_buf + resp_len - 4, "\r\n\r\n") == 0) {
+        if (strstr(resp_buf, "\r\n\r\n") != NULL) {
             break;
         }
     }
 
     // Verify 2xx response
-    if (strstr(resp_buf, " 200") == NULL && strstr(resp_buf, " 201") == NULL && strstr(resp_buf, " 204") == NULL) {
+    if (strstr(resp_buf, "HTTP/1.1 200") == NULL && strstr(resp_buf, "HTTP/1.0 200") == NULL) {
         if (out_err) *out_err = NURL_ERR_PROXY;
         socket_close(socket_fd);
         return -1;
     }
-
-    // Reset default socket timeouts
-#ifdef _WIN32
-    DWORD tv_reset = 0;
-    setsockopt((SOCKET)socket_fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&tv_reset, sizeof(tv_reset));
-    setsockopt((SOCKET)socket_fd, SOL_SOCKET, SO_SNDTIMEO, (const char *)&tv_reset, sizeof(tv_reset));
-#else
-    struct timeval tv_reset;
-    tv_reset.tv_sec = 0;
-    tv_reset.tv_usec = 0;
-    setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &tv_reset, sizeof(tv_reset));
-    setsockopt(socket_fd, SOL_SOCKET, SO_SNDTIMEO, &tv_reset, sizeof(tv_reset));
-#endif
 
     return socket_fd;
 }

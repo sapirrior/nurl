@@ -23,14 +23,14 @@ void nurl_pool_destroy(NurlConnPool *pool) {
     free(pool);
 }
 
-nurl_err_t nurl_pool_acquire(NurlConnPool *pool, const char *host, int port, const NurlRequest *req, NurlStream **stream) {
+nurl_err_t nurl_pool_acquire(NurlConnPool *pool, const char *host, int port, bool is_tls, const NurlRequest *req, NurlStream **stream) {
     if (!pool) return NURL_ERR_GENERIC;
     time_t now = time(NULL);
 
     // 1. Scan for existing warm connection
     for (int i = 0; i < NURL_POOL_MAX; i++) {
         NurlPoolEntry *e = &pool->entries[i];
-        if (e->stream && !e->in_use && e->port == port && strcmp(e->host, host) == 0) {
+        if (e->stream && !e->in_use && e->port == port && e->is_tls == is_tls && strcmp(e->host, host) == 0) {
             // Idle eviction check (e.g. 60 seconds)
             if (now - e->last_used > 60) {
                 if (req->verbose && !req->silent) {
@@ -105,21 +105,24 @@ nurl_err_t nurl_pool_acquire(NurlConnPool *pool, const char *host, int port, con
         nurl_net_set_timeout(fd, req->read_timeout_sec);
     }
 
-    nurl_tls_t *t = nurl_tls_create(req->tls_verify, req->cacert, req->cert, req->key, req->tls_version == 12, req->tls_version == 13);
-    if (!t) {
-        nurl_net_close(fd);
-        return NURL_ERR_TLS;
-    }
+    nurl_tls_t *t = NULL;
+    if (is_tls) {
+        t = nurl_tls_create(req->tls_verify, req->cacert, req->cert, req->key, req->tls_version == 12, req->tls_version == 13);
+        if (!t) {
+            nurl_net_close(fd);
+            return NURL_ERR_TLS;
+        }
 
-    if (nurl_tls_handshake(t, fd, host) != 0) {
-        nurl_tls_free(t);
-        nurl_net_close(fd);
-        return NURL_ERR_TLS_HANDSHAKE;
+        if (nurl_tls_handshake(t, fd, host) != 0) {
+            nurl_tls_free(t);
+            nurl_net_close(fd);
+            return NURL_ERR_TLS_HANDSHAKE;
+        }
     }
 
     NurlStream *s = nurl_stream_new(fd, t);
     if (!s) {
-        nurl_tls_free(t);
+        if (t) nurl_tls_free(t);
         nurl_net_close(fd);
         return NURL_ERR_OOM;
     }
@@ -132,6 +135,7 @@ nurl_err_t nurl_pool_acquire(NurlConnPool *pool, const char *host, int port, con
         strncpy(e->host, host, sizeof(e->host) - 1);
         e->host[sizeof(e->host) - 1] = '\0';
         e->port = port;
+        e->is_tls = is_tls;
         e->stream = s;
         e->in_use = true;
         e->last_used = now;

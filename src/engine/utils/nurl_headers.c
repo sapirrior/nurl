@@ -1,12 +1,10 @@
 #include "nurl_headers.h"
-#include "nurl_utils.h"
+#include "compat/nurl_compat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <ctype.h>
-
-
 
 static void canonicalize_header_key(char *key) {
     bool cap_next = true;
@@ -57,7 +55,7 @@ nurl_err_t nurl_headermap_set(NurlHeaderMap *m, const char *key, const char *val
     canonicalize_header_key(canon_key);
 
     for (size_t i = 0; i < m->count; i++) {
-        if (strcasecmp(m->keys[i], canon_key) == 0) {
+        if (nurl_strcasecmp(m->keys[i], canon_key) == 0) {
             free(canon_key);
             char *new_val = strdup(value);
             if (!new_val) return NURL_ERR_OOM;
@@ -111,7 +109,7 @@ nurl_err_t nurl_headermap_append(NurlHeaderMap *m, const char *key, const char *
 bool nurl_headermap_has(const NurlHeaderMap *m, const char *key) {
     if (!m || !key) return false;
     for (size_t i = 0; i < m->count; i++) {
-        if (strcasecmp(m->keys[i], key) == 0) {
+        if (nurl_strcasecmp(m->keys[i], key) == 0) {
             return true;
         }
     }
@@ -185,48 +183,4 @@ nurl_err_t nurl_headermap_add_raw(NurlHeaderMap *m, const char *line) {
     free(key);
     free(value);
     return err;
-}
-
-nurl_err_t nurl_headermap_apply_auth(NurlHeaderMap *m, const CommonArgs *a) {
-    if (!m || !a) return NURL_ERR_GENERIC;
-    if (a->no_auth) return NURL_OK;
-
-    if (nurl_headermap_has(m, "Authorization")) {
-        return NURL_OK;
-    }
-
-    if (a->bearer || a->token) {
-        const char *tok = a->bearer ? a->bearer : a->token;
-        char auth_val[1024];
-        snprintf(auth_val, sizeof(auth_val), "Bearer %s", tok);
-        return nurl_headermap_set(m, "Authorization", auth_val);
-    } else if (a->user) {
-        char *b64 = nurl_utils_base64_encode((const unsigned char *)a->user, strlen(a->user));
-        if (!b64) return NURL_ERR_OOM;
-        char auth_val[1024];
-        snprintf(auth_val, sizeof(auth_val), "Basic %s", b64);
-        free(b64);
-        return nurl_headermap_set(m, "Authorization", auth_val);
-    }
-
-    return NURL_OK;
-}
-
-nurl_err_t nurl_headermap_apply_common(NurlHeaderMap *m, const CommonArgs *a) {
-    if (!m || !a) return NURL_ERR_GENERIC;
-
-    if (a->user_agent && !nurl_headermap_has(m, "User-Agent")) {
-        nurl_err_t err = nurl_headermap_set(m, "User-Agent", a->user_agent);
-        if (err != NURL_OK) return err;
-    }
-    if (a->referer && !nurl_headermap_has(m, "Referer")) {
-        nurl_err_t err = nurl_headermap_set(m, "Referer", a->referer);
-        if (err != NURL_OK) return err;
-    }
-    if (a->cookie && !nurl_headermap_has(m, "Cookie")) {
-        nurl_err_t err = nurl_headermap_set(m, "Cookie", a->cookie);
-        if (err != NURL_OK) return err;
-    }
-
-    return NURL_OK;
 }
