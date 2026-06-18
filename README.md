@@ -153,7 +153,7 @@ cat image.png | nurl https://api.example.com/upload --upload -
 | `-w, --format <str>` | Custom output format (e.g. `%{http_code} %{time_total}s`). |
 | `-k, --insecure` | Skip TLS certificate validation. |
 | `-L, --follow` | Follow HTTP 3xx redirections. |
-| `--max-redirects <num>` | Limit the number of redirects to follow (default 10). |
+| `--max-redirects <num>`, `--max-redirs <num>` | Limit the number of redirects to follow (default 10). |
 | `-x, --proxy <url>` | Tunnel traffic through an HTTP proxy. |
 | `--connect-to <host:port:target:target_port>` | Override the connection target without changing the Host header. |
 | `-b, --cookie <val>` | Send cookies from string or file (`@file`). |
@@ -173,6 +173,7 @@ cat image.png | nurl https://api.example.com/upload --upload -
 *   **Connection Pooling**: Features a proactive pool with 60s idle-eviction.
 *   **TLS 1.2/1.3**: Fully supported via OpenSSL with automatic ALPN.
 *   **Resumable Transfers**: Native support for byte-range resumes.
+*   **Hardened Engine**: Robust handling of malformed responses, decompression failures, and large headers.
 
 
 ---

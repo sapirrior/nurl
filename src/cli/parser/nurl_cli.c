@@ -53,11 +53,11 @@ static int append_arg_str(char ***array, size_t *count, const char *val, const c
     *array = temp; (*count)++; return 0;
 }
 
-static int parse_positive_int(const char *optarg, const char *name) {
+static int parse_non_negative_int(const char *optarg, const char *name) {
     char *end;
     unsigned long v = strtoul(optarg, &end, 10);
-    if (*end != '\0' || v == 0 || v > 2147483647) {
-        nurl_diag_err("--%s must be a valid positive integer.", name);
+    if (*end != '\0' || v > 2147483647) {
+        nurl_diag_err("--%s must be a valid non-negative integer.", name);
         return -1;
     }
     return (int)v;
@@ -79,8 +79,8 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
         {"retry", 1, 0, 19}, {"retry-delay", 1, 0, 20}, {"referer", 1, 0, 'e'}, {"fail", 0, 0, 'f'},
         {"tls1.2", 0, 0, 21}, {"tls1.3", 0, 0, 22}, {"method", 1, 0, 'X'}, {"upload", 1, 0, 23},
         {"connect-timeout", 1, 0, 24}, {"download", 0, 0, 'D'}, {"ping", 0, 0, 25}, {"resolve", 0, 0, 26},
-        {"dry-run", 0, 0, 27}, {"max-redirects", 1, 0, 28}, {"fail-with-body", 0, 0, 29}, {"head", 0, 0, 'I'}, {"http1.0", 0, 0, 30}, {"dump-header", 1, 0, 31}, {"connect-to", 1, 0, 32}, {"limit-rate", 1, 0, 33}, {0, 0, 0, 0}
-    };
+        {"max-redirects", 1, 0, 28}, {"max-redirs", 1, 0, 28}, {"fail-with-body", 0, 0, 29}, {"head", 0, 0, 'I'}, {"http1.0", 0, 0, 30}, {"dump-header", 1, 0, 31}, {"connect-to", 1, 0, 32}, {"limit-rate", 1, 0, 33}, {0, 0, 0, 0}
+        };
 
     int opt; opterr = 0;
     while ((opt = getopt_long(argc, argv, "u:d:jt:LH:o:ivshkb:c:w:Vx:A:e:fX:DI", long_options, NULL)) != -1) {
@@ -93,7 +93,7 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
             case 'j': args->json = true; break;
             case 'k': args->no_verify = true; break;
             case 4:   if (set_arg_str(&args->cacert, optarg, "cacert")) return -1; break;
-            case 't': { int v = parse_positive_int(optarg, "timeout"); if (v < 0) return -1; args->timeout = (unsigned long)v; args->is_set.timeout = 1; break; }
+            case 't': { int v = parse_non_negative_int(optarg, "timeout"); if (v < 0) return -1; args->timeout = (unsigned long)v; args->is_set.timeout = 1; break; }
             case 'L': args->location = true; args->is_set.location = 1; break;
             case 'H': {
                 const char *colon = strchr(optarg, ':');
@@ -110,8 +110,8 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
             case 'v': args->verbose = true; break;
             case 's': args->silent = true; break;
             case 5:   args->raw = true; break;
-            case 6:   { int v = parse_positive_int(optarg, "count"); if (v < 0) return -1; args->ping_count = (unsigned int)v; break; }
-            case 7:   { int v = parse_positive_int(optarg, "interval"); if (v < 0) return -1; args->ping_interval = (unsigned long)v; break; }
+            case 6:   { int v = parse_non_negative_int(optarg, "count"); if (v < 0) return -1; args->ping_count = (unsigned int)v; break; }
+            case 7:   { int v = parse_non_negative_int(optarg, "interval"); if (v < 0) return -1; args->ping_interval = (unsigned long)v; break; }
             case 8:   args->resume = true; break;
             case 9:   args->progress = true; break;
             case 10:  if (set_arg_str(&args->upload_mime, optarg, "mime")) return -1; break;
@@ -128,20 +128,20 @@ int nurl_cli_parse(int argc, char **argv, CommonArgs *args, char **command, char
             case 17:  if (set_arg_str(&args->no_proxy, optarg, "no-proxy")) return -1; break;
             case 'A': if (set_arg_str(&args->user_agent, optarg, "user-agent")) return -1; args->is_set.user_agent = 1; break;
             case 18:  args->compressed = true; break;
-            case 19:  { int v = parse_positive_int(optarg, "retry"); if (v < 0) return -1; args->retry = (unsigned int)v; break; }
-            case 20:  { int v = parse_positive_int(optarg, "retry-delay"); if (v < 0) return -1; args->retry_delay = (unsigned long)v; break; }
+            case 19:  { int v = parse_non_negative_int(optarg, "retry"); if (v < 0) return -1; args->retry = (unsigned int)v; break; }
+            case 20:  { int v = parse_non_negative_int(optarg, "retry-delay"); if (v < 0) return -1; args->retry_delay = (unsigned long)v; break; }
             case 'e': if (set_arg_str(&args->referer, optarg, "referer")) return -1; break;
             case 'f': args->fail = true; break;
             case 21:  args->tls12 = true; break;
             case 22:  args->tls13 = true; break;
             case 'X': if (set_arg_str(&args->method, optarg, "method")) return -1; break;
             case 23:  if (set_arg_str(&args->upload_file, optarg, "upload")) return -1; break;
-            case 24:  { int v = parse_positive_int(optarg, "connect-timeout"); if (v < 0) return -1; args->connect_timeout = (unsigned long)v; args->is_set.connect_timeout = 1; break; }
+            case 24:  { int v = parse_non_negative_int(optarg, "connect-timeout"); if (v < 0) return -1; args->connect_timeout = (unsigned long)v; args->is_set.connect_timeout = 1; break; }
             case 'D': args->download = true; break;
             case 25:  args->ping = true; break;
             case 26:  args->resolve = true; break;
             case 27:  args->dry_run = true; break;
-            case 28:  { int v = parse_positive_int(optarg, "max-redirects"); if (v < 0) return -1; args->max_redirects = (unsigned int)v; break; }
+            case 28:  { int v = parse_non_negative_int(optarg, "max-redirects"); if (v < 0) return -1; args->max_redirects = (unsigned int)v; args->is_set.max_redirects = 1; break; }
             case 29:  args->fail_with_body = true; break;
             case 30:  args->http10 = true; break;
             case 31:  if (set_arg_str(&args->dump_header, optarg, "dump-header")) return -1; break;

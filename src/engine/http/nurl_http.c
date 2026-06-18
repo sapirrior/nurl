@@ -1,4 +1,5 @@
 #include "nurl_http.h"
+#include "nurl_buf.h"
 #include "errors/nurl_diag.h"
 #include "compat/nurl_compat.h"
 #include <stdio.h>
@@ -34,11 +35,8 @@ nurl_err_t nurl_http_request(
     }
 
     // 1. Construct HTTP request headers
-    size_t req_capacity = 4096 + (p->extra_headers ? strlen(p->extra_headers) : 0);
-    char *req_buf = malloc(req_capacity);
-    if (!req_buf) {
-        return NURL_ERR_OOM;
-    }
+    NurlBuf req_buf;
+    nurl_buf_init(&req_buf);
 
     bool has_user_agent = false;
     bool has_connection = false;
@@ -67,37 +65,52 @@ nurl_err_t nurl_http_request(
         }
     }
 
-    int written;
-    written = snprintf(req_buf, req_capacity, "%s %s HTTP/%s\r\nHost: %s\r\n", p->method, p->path, p->http10 ? "1.0" : "1.1", p->hostname);
+    if (!nurl_buf_printf(&req_buf, "%s %s HTTP/%s\r\nHost: %s\r\n", p->method, p->path, p->http10 ? "1.0" : "1.1", p->hostname)) {
+        nurl_buf_free(&req_buf);
+        return NURL_ERR_OOM;
+    }
+
     if (!has_user_agent) {
-        written += snprintf(req_buf + written, req_capacity - written, "User-Agent: nurl/" NURL_VERSION "\r\n");
+        if (!nurl_buf_printf(&req_buf, "User-Agent: nurl/" NURL_VERSION "\r\n")) {
+            nurl_buf_free(&req_buf);
+            return NURL_ERR_OOM;
+        }
     }
     if (!has_connection) {
-        written += snprintf(req_buf + written, req_capacity - written, "Connection: %s\r\n", p->http10 ? "close" : "close");
-        // Wait, if http1.1 we also use close because the engine currently doesn't support persistent connections well in all paths?
-        // Actually, nurl uses "close" by default for now.
+        if (!nurl_buf_printf(&req_buf, "Connection: %s\r\n", p->http10 ? "close" : "close")) {
+            nurl_buf_free(&req_buf);
+            return NURL_ERR_OOM;
+        }
     }
 
     if (total_body_len > 0) {
-        written += snprintf(req_buf + written, req_capacity - written,
-            "Content-Length: %zu\r\n", total_body_len);
+        if (!nurl_buf_printf(&req_buf, "Content-Length: %zu\r\n", total_body_len)) {
+            nurl_buf_free(&req_buf);
+            return NURL_ERR_OOM;
+        }
     }
 
     if (p->extra_headers) {
-        written += snprintf(req_buf + written, req_capacity - written, "%s", p->extra_headers);
+        if (!nurl_buf_append(&req_buf, p->extra_headers, strlen(p->extra_headers))) {
+            nurl_buf_free(&req_buf);
+            return NURL_ERR_OOM;
+        }
     }
 
     // Append final CRLF separating headers and body
-    written += snprintf(req_buf + written, req_capacity - written, "\r\n");
+    if (!nurl_buf_append(&req_buf, "\r\n", 2)) {
+        nurl_buf_free(&req_buf);
+        return NURL_ERR_OOM;
+    }
 
     // Send HTTP Headers
-    int w_headers = nurl_stream_write(stream, req_buf, written);
+    int w_headers = nurl_stream_write(stream, req_buf.data, req_buf.len);
     if (w_headers <= 0) {
         nurl_err_t err = (w_headers < 0) ? (nurl_err_t)(-w_headers) : NURL_ERR_NETWORK;
-        free(req_buf);
+        nurl_buf_free(&req_buf);
         return err;
     }
-    free(req_buf);
+    nurl_buf_free(&req_buf);
 
     // Send HTTP Body Parts if present
     if (p->body_parts && p->body_parts_count > 0) {
@@ -358,12 +371,9 @@ nurl_err_t nurl_http_request(
             if (to_read > sizeof(chunk_buf)) to_read = sizeof(chunk_buf);
             int n = nurl_stream_read(stream, chunk_buf, to_read);
             if (n <= 0) {
-                if (n < 0) {
-                    if (body_buf) free(body_buf);
-                    nurl_http_response_free(res);
-                    return (nurl_err_t)(-n);
-                }
-                break; // Premature EOF
+                if (body_buf) free(body_buf);
+                nurl_http_response_free(res);
+                return (n < 0) ? (nurl_err_t)(-n) : NURL_ERR_NETWORK;
             }
 
             if (p->body_out) {

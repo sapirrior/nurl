@@ -45,6 +45,9 @@ int nurl_engine_execute_request(
     char **out_effective_url,
     NurlOperationStats *out_stats
 ) {
+    if (!req || !req->headers) {
+        return NURL_ERR_GENERIC;
+    }
     if (out_stats) {
         out_stats->connect_time_sec = 0;
         out_stats->num_redirects = 0;
@@ -54,7 +57,7 @@ int nurl_engine_execute_request(
 
     char *current_url = strdup(req->url);
     int redirects_followed = 0;
-    const int max_redirects = req->max_redirects > 0 ? req->max_redirects : 5;
+    const int max_redirects = req->max_redirects;
 
     nurl_http_response_t *res = NULL;
 
@@ -238,7 +241,8 @@ int nurl_engine_execute_request(
             fprintf(stderr, "> Connection: close\n");
 
             char *hdr_copy = strdup(extra_hdr);
-            char *line = strtok(hdr_copy, "\r\n");
+            char *saveptr = NULL;
+            char *line = strtok_r(hdr_copy, "\r\n", &saveptr);
             while (line) {
                 char *colon = strchr(line, ':');
                 if (colon) {
@@ -249,7 +253,7 @@ int nurl_engine_execute_request(
                     const char *redacted = nurl_utils_redact_header(key, val);
                     fprintf(stderr, "> %s: %s\n", key, redacted);
                 }
-                line = strtok(NULL, "\r\n");
+                line = strtok_r(NULL, "\r\n", &saveptr);
             }
             free(hdr_copy);
             fprintf(stderr, "> \n");
@@ -311,6 +315,9 @@ int nurl_engine_execute_request(
                     res->body_len = decompressed_len;
                 } else {
                     fprintf(stderr, "nurl: Failed to decompress response payload.\n");
+                    nurl_http_response_free(res);
+                    free(scheme); free(host); free(path); free(current_url);
+                    return NURL_ERR_GENERIC;
                 }
             }
         }
@@ -362,8 +369,10 @@ int nurl_engine_execute_request(
                                         char *k_attr = nurl_utils_trim(attr);
                                         char *v_attr = nurl_utils_trim(attr_eq + 1);
                                         if (nurl_strcasecmp(k_attr, "domain") == 0) {
+                                            if (domain) free(domain);
                                             domain = strdup(v_attr);
                                         } else if (nurl_strcasecmp(k_attr, "path") == 0) {
+                                            if (cookie_path) free(cookie_path);
                                             cookie_path = strdup(v_attr);
                                         }
                                     } else {

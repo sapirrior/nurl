@@ -2,7 +2,7 @@
 #define NURL_H
 
 #ifndef NURL_VERSION
-#define NURL_VERSION "0.8.0"
+#define NURL_VERSION "0.8.1"
 #endif
 
 #include <stdbool.h>
@@ -87,6 +87,7 @@ typedef struct {
         uint64_t connect_timeout : 1;
         uint64_t location : 1;
         uint64_t user_agent : 1;
+        uint64_t max_redirects : 1;
     } is_set;
 } CommonArgs;
 

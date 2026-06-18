@@ -27,7 +27,9 @@ void nurl_cookie_jar_free(nurl_cookie_jar_t *jar) {
 nurl_cookie_jar_t *nurl_cookie_jar_load(const char *path) {
     FILE *f = fopen(path, "r");
     if (!f) {
-        nurl_diag_err("could not open cookie jar '%s' for reading: %s", path, strerror(errno));
+        if (errno != ENOENT) {
+            nurl_diag_err("could not open cookie jar '%s' for reading: %s", path, strerror(errno));
+        }
         return NULL;
     }
 

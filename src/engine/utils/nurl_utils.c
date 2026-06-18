@@ -144,16 +144,26 @@ char *nurl_utils_base64_encode(const unsigned char *src, size_t len) {
 
     size_t i = 0, j = 0;
     while (i < len) {
-        uint32_t octet_a = i < len ? src[i++] : 0;
-        uint32_t octet_b = i < len ? src[i++] : 0;
-        uint32_t octet_c = i < len ? src[i++] : 0;
+        int octets_read = 0;
+        uint32_t octet_a = i < len ? (octets_read++, src[i++]) : 0;
+        uint32_t octet_b = i < len ? (octets_read++, src[i++]) : 0;
+        uint32_t octet_c = i < len ? (octets_read++, src[i++]) : 0;
 
         uint32_t triple = (octet_a << 16) + (octet_b << 8) + octet_c;
 
         out[j++] = b64_table[(triple >> 18) & 0x3F];
         out[j++] = b64_table[(triple >> 12) & 0x3F];
-        out[j++] = (i > len + 1) ? '=' : b64_table[(triple >> 6) & 0x3F];
-        out[j++] = (i > len) ? '=' : b64_table[triple & 0x3F];
+        
+        if (octets_read == 1) {
+            out[j++] = '=';
+            out[j++] = '=';
+        } else if (octets_read == 2) {
+            out[j++] = b64_table[(triple >> 6) & 0x3F];
+            out[j++] = '=';
+        } else {
+            out[j++] = b64_table[(triple >> 6) & 0x3F];
+            out[j++] = b64_table[triple & 0x3F];
+        }
     }
     out[out_len] = '\0';
     return out;

@@ -1,5 +1,6 @@
 #include "nurl_engine_request.h"
 #include "nurl_multipart.h"
+#include "nurl_buf.h"
 #include "utils/nurl_utils.h"
 #include <stdlib.h>
 #include <string.h>
@@ -23,16 +24,30 @@ nurl_err_t nurl_headermap_apply_auth(NurlHeaderMap *m, const CommonArgs *a) {
 
     if (a->bearer || a->token) {
         const char *tok = a->bearer ? a->bearer : a->token;
-        char auth_val[1024];
-        snprintf(auth_val, sizeof(auth_val), "Bearer %s", tok);
-        return nurl_headermap_set(m, "Authorization", auth_val);
+        NurlBuf auth_val;
+        nurl_buf_init(&auth_val);
+        if (!nurl_buf_printf(&auth_val, "Bearer %s", tok)) {
+            nurl_buf_free(&auth_val);
+            return NURL_ERR_OOM;
+        }
+        nurl_err_t err = nurl_headermap_set(m, "Authorization", auth_val.data);
+        nurl_buf_free(&auth_val);
+        return err;
     } else if (a->user) {
         char *b64 = nurl_utils_base64_encode((const unsigned char *)a->user, strlen(a->user));
         if (!b64) return NURL_ERR_OOM;
-        char auth_val[1024];
-        snprintf(auth_val, sizeof(auth_val), "Basic %s", b64);
+        
+        NurlBuf auth_val;
+        nurl_buf_init(&auth_val);
+        if (!nurl_buf_printf(&auth_val, "Basic %s", b64)) {
+            free(b64);
+            nurl_buf_free(&auth_val);
+            return NURL_ERR_OOM;
+        }
         free(b64);
-        return nurl_headermap_set(m, "Authorization", auth_val);
+        nurl_err_t err = nurl_headermap_set(m, "Authorization", auth_val.data);
+        nurl_buf_free(&auth_val);
+        return err;
     }
 
     return NURL_OK;
@@ -49,7 +64,7 @@ nurl_err_t nurl_headermap_apply_common(NurlHeaderMap *m, const CommonArgs *a) {
         nurl_err_t err = nurl_headermap_set(m, "Referer", a->referer);
         if (err != NURL_OK) return err;
     }
-    if (a->cookie && !nurl_headermap_has(m, "Cookie")) {
+    if (a->cookie && a->cookie[0] != '@' && !nurl_headermap_has(m, "Cookie")) {
         nurl_err_t err = nurl_headermap_set(m, "Cookie", a->cookie);
         if (err != NURL_OK) return err;
     }
@@ -107,7 +122,7 @@ void nurl_request_from_args(NurlRequest *req, const char *method, const char *ur
     req->read_timeout_sec = (unsigned int)a->timeout;
     req->connect_timeout_sec = (unsigned int)a->connect_timeout;
     req->follow_redirect = a->location;
-    req->max_redirects = a->max_redirects > 0 ? a->max_redirects : 10;
+    req->max_redirects = a->is_set.max_redirects ? a->max_redirects : 10;
     req->retry_count = a->retry;
     req->retry_delay_sec = a->retry_delay;
     req->limit_rate = a->limit_rate;
