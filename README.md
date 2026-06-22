@@ -1,8 +1,8 @@
-# Sonet (nurl)
+# Sonet
 
-Sonet (`nurl`) is a clean, fast, portable, and structured HTTP client CLI written in C. 
+Sonet is a clean, fast, portable, and structured HTTP client CLI written in C. 
 
-Unlike traditional command-line HTTP clients that clutter the terminal with complex layouts, `nurl` is built with a simple design philosophy: **plain text, structured details, and smart diagnostics by default.**
+Unlike traditional command-line HTTP clients that clutter the terminal with complex layouts, `sonet` is built with a simple design philosophy: **plain text, structured details, and smart diagnostics by default.**
 
 ---
 
@@ -13,6 +13,7 @@ The codebase is organized into nested modules dividing user-interface logic from
 ```text
 src/
 ├── main.c                  # Program entry point (WSA startup/cleanup)
+├── cli/                    # CLI Interface Layer
 ├── cli/                    # CLI Interface Layer
 │   ├── parser/             # Optimized argument parsing (sonet_cli.c)
 │   └── runner/             # Dispatcher, request execution, & progress reporting
@@ -34,7 +35,7 @@ src/
 
 ## 2. Smart Error DX (Developer Experience)
 
-`nurl` features a context-aware diagnostic system designed to help you solve issues quickly. Instead of cryptic error codes or bulky blocks, you get concise, standard Unix-style messages with helpful hints.
+`sonet` features a context-aware diagnostic system designed to help you solve issues quickly. Instead of cryptic error codes or bulky blocks, you get concise, standard Unix-style messages with helpful hints.
 
 Furthermore, syntax errors or invalid flags output specific error diagnostics rather than dumping the entire help dialogue:
 
@@ -43,7 +44,7 @@ sonet: error: option unrecognized or invalid.
       hint: run 'sonet --help' for usage.
 ```
 
-If a network or file operation fails, `nurl` provides a friendly diagnostic:
+If a network or file operation fails, `sonet` provides a friendly diagnostic:
 
 ```text
 sonet: error: network connection reset or interrupted during the request to 'https://api.example.com'
@@ -72,7 +73,7 @@ The [Makefile](Makefile) is tuned for production-grade builds:
 *   **Cross-Platform**: Full support for Linux, macOS, and Windows (MinGW).
 
 ### Testing & Debugging
-`nurl` ships with a full suite of unit and integration tests to ensure reliability:
+`sonet` ships with a full suite of unit and integration tests to ensure reliability:
 ```bash
 make test       # Runs the C unit test runner and bash integration suite
 make asan       # Builds the project with AddressSanitizer and UndefinedBehaviorSanitizer
@@ -83,7 +84,7 @@ make debug      # Compiles a non-optimized debug build with symbols (`-g3 -O0`)
 
 ## 4. Command Usage Guide
 
-`nurl` uses a modern, flag-triggered CLI model. There are no subcommands; behavior is determined by flags.
+`sonet` uses a modern, flag-triggered CLI model. There are no subcommands; behavior is determined by flags.
 
 ### 4.1. Standard REST Operations
 
@@ -176,7 +177,7 @@ cat image.png | sonet https://api.example.com/upload --upload -
 
 ## 6. Protocol Support
 
-`nurl` is a highly-optimized **HTTP/1.1** client:
+`sonet` is a highly-optimized **HTTP/1.1** client:
 
 *   **Buffered I/O (8KB)**: Unified `SonetStream` abstraction reduces syscall overhead.
 *   **Connection Pooling**: Features a proactive pool with 60s idle-eviction.
@@ -189,7 +190,7 @@ cat image.png | sonet https://api.example.com/upload --upload -
 
 ## 7. Cross-Platform Compatibility
 
-`nurl` runs identically on **Linux, macOS, and Windows**:
+`sonet` runs identically on **Linux, macOS, and Windows**:
 *   **Windows (Winsock)**: Native support for Winsock2 and `WSAPoll`.
 *   **Portable Timers**: High-resolution timing using OS-native primitives.
 *   **Static Build**: Portable binary with zero runtime library dependencies.
