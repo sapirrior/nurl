@@ -1,5 +1,5 @@
-nurl
-nurl.exe
+nut
+nut.exe
 *.o
 build/
 *.d

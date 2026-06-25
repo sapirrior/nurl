@@ -1,5 +1,5 @@
-#ifndef SONET_TEST_RUNNER_H
-#define SONET_TEST_RUNNER_H
+#ifndef NUT_TEST_RUNNER_H
+#define NUT_TEST_RUNNER_H
 
 #include <stdio.h>
 #include <string.h>
@@ -66,4 +66,4 @@ extern int tests_failed;
         return tests_failed > 0 ? 1 : 0; \
     }
 
-#endif /* SONET_TEST_RUNNER_H */
+#endif /* NUT_TEST_RUNNER_H */
